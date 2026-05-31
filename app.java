@@ -50,6 +50,8 @@ public class app extends Application {
     HBox contentArea = new HBox(10, leftPanel, centerPanel, rightPanel);
     contentArea.setPadding(new Insets(10));
     contentArea.setFillHeight(true);
+    contentArea.setFillHeight(true);
+    VBox.setVgrow(contentArea, Priority.ALWAYS); 
     HBox.setHgrow(centerPanel, Priority.ALWAYS);
     
     leftPanel.setPrefWidth(250);
@@ -169,6 +171,8 @@ public class app extends Application {
     VBox panel = new VBox(10);
     panel.setPadding(new Insets(15));
     panel.setStyle("-fx-background-color: #040D43; -fx-border-color: #7F8EE3; -fx-border-radius: 5; -fx-background-radius: 5;");
+    panel.setFillWidth(true);  // Add this to fill width
+    VBox.setVgrow(panel, Priority.ALWAYS);  // Add this to make panel grow vertically
     
     Label title = new Label("BRACKET VIEW");
     title.setFont(Font.font("Arial", FontWeight.BOLD, 14));
@@ -176,7 +180,9 @@ public class app extends Application {
     
     bracketView = new VBox(10);
     bracketView.setPadding(new Insets(10));
-    bracketView.setStyle("-fx-background-color: #152055 ; -FX-border-color: #7F8EE3; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5;");
+    bracketView.setStyle("-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5;");
+    bracketView.setFillWidth(true);  // Add this
+    VBox.setVgrow(bracketView, Priority.ALWAYS);  // Make bracketView expand vertically
     
     panel.getChildren().addAll(title, bracketView);
     
