@@ -9,7 +9,15 @@ public class Match {
     private boolean completed;
     private int matchId;
     private static int idCounter = 1;
-    private boolean isWinnersBracket;   // ← real flag instead of hardcoded round <= 8
+    private boolean isWinnersBracket;
+
+    public static void resetIdCounter() { idCounter = 1; }
+
+    // ── Play-In flags ──────────────────────────────────────────────────────
+    private boolean isPlayIn           = false;
+    private boolean isPlayInGrandFinal = false;
+    private boolean isMainBracket      = false;
+    private Match   mainBracketSlot    = null;
 
     public Match(int round) {
         this.round = round;
@@ -23,30 +31,38 @@ public class Match {
         this.isWinnersBracket = false;
     }
 
-    // GETTERS
-    public Match getLeftChild()    { return leftChild; }
-    public Match getRightChild()   { return rightChild; }
-    public Team  getTeam1()        { return team1; }
-    public Team  getTeam2()        { return team2; }
-    public Team  getWinner()       { return winner; }
-    public int   getRound()        { return round; }
-    public boolean isCompleted()   { return completed; }
-    public int   getMatchId()      { return matchId; }
-    public String getScore()       { return score; }
-    public boolean isWinnersBracket() { return isWinnersBracket; }
+    // ── GETTERS ────────────────────────────────────────────────────────────
+    public Match   getLeftChild()          { return leftChild; }
+    public Match   getRightChild()         { return rightChild; }
+    public Team    getTeam1()              { return team1; }
+    public Team    getTeam2()              { return team2; }
+    public Team    getWinner()             { return winner; }
+    public int     getRound()              { return round; }
+    public boolean isCompleted()           { return completed; }
+    public int     getMatchId()            { return matchId; }
+    public String  getScore()              { return score; }
+    public boolean isWinnersBracket()      { return isWinnersBracket; }
+    public boolean isPlayIn()              { return isPlayIn; }
+    public boolean isPlayInGrandFinal()    { return isPlayInGrandFinal; }
+    public boolean isMainBracket()         { return isMainBracket; }
+    public Match   getMainBracketSlot()    { return mainBracketSlot; }
 
     public boolean isReady() {
         return (team1 != null && team2 != null);
     }
 
-    // SETTERS
-    public void setLeftChild(Match leftChild)   { this.leftChild = leftChild; }
-    public void setRightChild(Match rightChild) { this.rightChild = rightChild; }
-    public void setTeam1(Team team1)            { this.team1 = team1; }
-    public void setTeam2(Team team2)            { this.team2 = team2; }
-    public void setMatchId(int matchId)         { this.matchId = matchId; }
-    public void setRound(int round)             { this.round = round; }
-    public void setIsWinnersBracket(boolean isWinners) { this.isWinnersBracket = isWinners; }
+    // ── SETTERS ────────────────────────────────────────────────────────────
+    public void setLeftChild(Match leftChild)                  { this.leftChild = leftChild; }
+    public void setRightChild(Match rightChild)                { this.rightChild = rightChild; }
+    public void setTeam1(Team team1)                           { this.team1 = team1; }
+    public void setTeam2(Team team2)                           { this.team2 = team2; }
+    public void setMatchId(int matchId)                        { this.matchId = matchId; }
+    public void setRound(int round)                            { this.round = round; }
+    public void setIsWinnersBracket(boolean isWinners)         { this.isWinnersBracket = isWinners; }
+    public void setIsPlayIn(boolean isPlayIn)                  { this.isPlayIn = isPlayIn; }
+    public void setIsPlayInGrandFinal(boolean isGrandFinal)    { this.isPlayInGrandFinal = isGrandFinal; }
+    public void setIsMainBracket(boolean isMainBracket)        { this.isMainBracket = isMainBracket; }
+    public void setMainBracketSlot(Match slot)                 { this.mainBracketSlot = slot; }
 
     public void setWinner(Team winner, int score1, int score2) {
         this.winner = winner;
@@ -65,16 +81,21 @@ public class Match {
         this.completed = true;
     }
 
-    public void setScore(String score)           { this.score = score; }
-    public void setCompleted(boolean completed)  { this.completed = completed; }
+    public void setScore(String score)          { this.score = score; }
+    public void setCompleted(boolean completed) { this.completed = completed; }
 
+    @Override
     public String toString() {
         String t1 = (team1 == null) ? "TBD" : team1.getName();
         String t2 = (team2 == null) ? "TBD" : team2.getName();
+        String tag = isPlayInGrandFinal ? "[PI-GF]"
+                   : isPlayIn          ? "[PI]"
+                   : isMainBracket     ? "[MAIN]"
+                   : "";
         if (completed && winner != null) {
-            return "R" + round + "M" + matchId + ":" + t1 + "vs" + t2
-                   + "→" + winner.getName() + "(" + score + ")";
+            return tag + "R" + round + "M" + matchId + ":"
+                   + t1 + "vs" + t2 + "→" + winner.getName() + "(" + score + ")";
         }
-        return "R" + round + "M" + matchId + ":" + t1 + "vs" + t2 + " [PENDING]";
+        return tag + "R" + round + "M" + matchId + ":" + t1 + "vs" + t2 + " [PENDING]";
     }
 }

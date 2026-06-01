@@ -9,27 +9,43 @@ public class TournamentBracket {
     private TournamentType tournamentType;
     private List<Match> losersBracketMatches;
     private Match grandFinals;
-    // Maps a winners-bracket match → the losers-bracket match that receives its loser
     private Map<Match, Match> winnerToLoserMatch;
+
+    // ── Play-In specific fields ───────────────────────────────────────────────
+    // playInMatches    : all matches inside the DE play-in sub-bracket
+    // mainBracketMatches: semifinals + final that the bye teams wait in
+    // byeTeams         : top N seeds who skip the play-in
+    // playInSlots      : semifinal match slots waiting for play-in winners
+    private List<Match> playInMatches;
+    private List<Match> mainBracketMatches;
+    private Team[]      byeTeams;
+    private List<Match> playInSlots;   // semifinal matches in main bracket
+    private int         playInWinnersRounds; // WB rounds inside the play-in
 
     public TournamentBracket(Team[] teams) {
         this(teams, TournamentType.SINGLE_ELIMINATION);
     }
 
     public TournamentBracket(Team[] teams, TournamentType type) {
-        this.teams = teams;
-        this.scoreMatrix = new ScoreMatrix(teams);
-        this.tournamentType = type;
-        this.allMatches = new ArrayList<>();
-        this.winnerToLoserMatch = new HashMap<>();
+        Match.resetIdCounter();   // always start match IDs fresh for each new bracket
+        this.teams                = teams;
+        this.scoreMatrix          = new ScoreMatrix(teams);
+        this.tournamentType       = type;
+        this.allMatches           = new ArrayList<>();
+        this.winnerToLoserMatch   = new HashMap<>();
         this.losersBracketMatches = new ArrayList<>();
+        this.playInMatches        = new ArrayList<>();
+        this.mainBracketMatches   = new ArrayList<>();
+        this.playInSlots          = new ArrayList<>();
 
-        if      (type == TournamentType.SINGLE_ELIMINATION) buildSingleElimination(teams);
-        else if (type == TournamentType.ROUND_ROBIN)        buildRoundRobin(teams);
-        else if (type == TournamentType.DOUBLE_ELIMINATION) buildDoubleElimination(teams);
-        else if (type == TournamentType.SWISS)              buildSwissSystem(teams);
-        else if (type == TournamentType.FREE_FOR_ALL)       buildFreeForAll(teams);
-        else                                                 buildSingleElimination(teams);
+        if      (type == TournamentType.SINGLE_ELIMINATION)         buildSingleElimination(teams);
+        else if (type == TournamentType.ROUND_ROBIN)                buildRoundRobin(teams);
+        else if (type == TournamentType.DOUBLE_ELIMINATION)         buildDoubleElimination(teams);
+        else if (type == TournamentType.SWISS)                      buildSwissSystem(teams);
+        else if (type == TournamentType.FREE_FOR_ALL)               buildFreeForAll(teams);
+        else if (type == TournamentType.PLAY_IN_DOUBLE_ELIMINATION)  buildPlayInDE(teams);
+        else if (type == TournamentType.PLAY_IN_SINGLE_ELIMINATION)  buildPlayInSE(teams);
+        else                                                         buildSingleElimination(teams);
     }
 
     public TournamentBracket(Team[] teams, String type) {
@@ -39,12 +55,14 @@ public class TournamentBracket {
     private static TournamentType convertToTournamentType(String type) {
         if (type == null) return TournamentType.SINGLE_ELIMINATION;
         switch (type) {
-            case "Single Elimination": return TournamentType.SINGLE_ELIMINATION;
-            case "Double Elimination": return TournamentType.DOUBLE_ELIMINATION;
-            case "Round Robin":        return TournamentType.ROUND_ROBIN;
-            case "Swiss System":       return TournamentType.SWISS;
-            case "Free For All":       return TournamentType.FREE_FOR_ALL;
-            default:                   return TournamentType.SINGLE_ELIMINATION;
+            case "Single Elimination":          return TournamentType.SINGLE_ELIMINATION;
+            case "Double Elimination":          return TournamentType.DOUBLE_ELIMINATION;
+            case "Round Robin":                 return TournamentType.ROUND_ROBIN;
+            case "Swiss System":                return TournamentType.SWISS;
+            case "Free For All":                return TournamentType.FREE_FOR_ALL;
+            case "Play-In Double Elimination":  return TournamentType.PLAY_IN_DOUBLE_ELIMINATION;
+            case "Play-In Single Elimination":  return TournamentType.PLAY_IN_SINGLE_ELIMINATION;
+            default:                            return TournamentType.SINGLE_ELIMINATION;
         }
     }
 
@@ -53,18 +71,33 @@ public class TournamentBracket {
     // =========================================================================
 
     private void buildSingleElimination(Team[] teams) {
-        int numRounds   = (int) Math.ceil(Math.log(teams.length) / Math.log(2));
-        int bracketSize = (int) Math.pow(2, numRounds);
+        int n = teams.length;
+        allMatches.clear();
+        losersBracketMatches = new ArrayList<>();
+        playInMatches        = new ArrayList<>();
+        mainBracketMatches   = new ArrayList<>();
+        playInSlots          = new ArrayList<>();
+        winnerToLoserMatch.clear();
+
+        int numRounds = (int) Math.ceil(Math.log(n) / Math.log(2));
+        int fullSize  = (int) Math.pow(2, numRounds);
+
+        // For standard power-of-2 counts (4, 8, 16, 32): fill all slots, no byes
+        // For bye counts (10 → pad to 16, 20 → pad to 32): top seeds get byes
+        Team[] slots = seededSlots(teams, fullSize);
 
         List<Match> currentRound = new ArrayList<>();
         int matchId = 1;
 
-        for (int i = 0; i < bracketSize; i += 2) {
+        for (int i = 0; i < fullSize; i += 2) {
+            Team t1 = slots[i];
+            Team t2 = slots[i + 1];
+            if (t1 == null && t2 == null) continue;
             Match m = new Match(1);
             m.setMatchId(matchId++);
-            if (i     < teams.length) m.setTeam1(teams[i]);
-            if (i + 1 < teams.length) m.setTeam2(teams[i + 1]);
-            autoCompleteBye(m);
+            if (t1 != null) m.setTeam1(t1);
+            if (t2 != null) m.setTeam2(t2);
+            if (!isPowerOfTwo(n)) autoCompleteBye(m); // only auto-advance byes for non-power-of-2
             if (m.getTeam1() != null || m.getTeam2() != null) {
                 currentRound.add(m);
                 allMatches.add(m);
@@ -79,12 +112,10 @@ public class TournamentBracket {
                 parent.setMatchId(matchId++);
                 parent.setLeftChild(currentRound.get(i));
                 parent.setRightChild(currentRound.get(i + 1));
-                // Propagate bye winners immediately
                 if (currentRound.get(i).isCompleted())
                     parent.setTeam1(currentRound.get(i).getWinner());
                 if (currentRound.get(i + 1).isCompleted())
                     parent.setTeam2(currentRound.get(i + 1).getWinner());
-                autoCompleteBye(parent);
                 next.add(parent);
                 allMatches.add(parent);
             }
@@ -96,14 +127,16 @@ public class TournamentBracket {
         this.root = currentRound.isEmpty() ? null : currentRound.get(0);
     }
 
+    private boolean isPowerOfTwo(int n) { return n > 0 && (n & (n - 1)) == 0; }
+
     // =========================================================================
-    // DOUBLE ELIMINATION  (supports 4–32 teams)
+    // DOUBLE ELIMINATION  (power-of-2 only: 4, 8, 16, 32)
     // =========================================================================
 
     private void buildDoubleElimination(Team[] teams) {
-        int numTeams    = teams.length;
-        int numRounds   = (int) Math.ceil(Math.log(numTeams) / Math.log(2));
-        int bracketSize = (int) Math.pow(2, numRounds);
+        int n         = teams.length;
+        int numRounds = (int)(Math.log(n) / Math.log(2));
+        int fullSize  = n;
 
         allMatches.clear();
         losersBracketMatches = new ArrayList<>();
@@ -112,236 +145,626 @@ public class TournamentBracket {
         int matchId       = 1;
         int losersMatchId = 1000;
 
-        // ----------------------------------------------------------------
-        // WINNERS BRACKET — round numbers 1..numRounds
-        // ----------------------------------------------------------------
-        // Track which matches are real (2 teams) vs bye (1 team) vs empty
-        Set<Match> byeWBMatches = new HashSet<>();
+        Team[] slots = seededSlots(teams, fullSize);
 
-        List<Match> wbRound1 = new ArrayList<>();
-        for (int i = 0; i < bracketSize; i += 2) {
-            boolean has1 = i     < numTeams;
-            boolean has2 = i + 1 < numTeams;
-            if (!has1 && !has2) continue;   // empty slot – skip entirely
-
+        // WB Round 1
+        List<Match> wbR1 = new ArrayList<>();
+        for (int i = 0; i < fullSize; i += 2) {
             Match m = new Match(1);
             m.setMatchId(matchId++);
             m.setIsWinnersBracket(true);
-            if (has1) m.setTeam1(teams[i]);
-            if (has2) m.setTeam2(teams[i + 1]);
-
-            if (autoCompleteBye(m)) byeWBMatches.add(m);   // bye: record it
-
-            wbRound1.add(m);
+            m.setTeam1(slots[i]);
+            m.setTeam2(slots[i + 1]);
+            wbR1.add(m);
             allMatches.add(m);
         }
 
-        // Build subsequent WB rounds
         List<List<Match>> wbRounds = new ArrayList<>();
-        wbRounds.add(wbRound1);
-        List<Match> wbCurrent = new ArrayList<>(wbRound1);
+        wbRounds.add(wbR1);
+        List<Match> wbCurrent = new ArrayList<>(wbR1);
 
         for (int r = 2; r <= numRounds; r++) {
             List<Match> wbNext = new ArrayList<>();
             for (int i = 0; i + 1 < wbCurrent.size(); i += 2) {
-                Match parent = new Match(r);
-                parent.setMatchId(matchId++);
-                parent.setIsWinnersBracket(true);
-                parent.setLeftChild(wbCurrent.get(i));
-                parent.setRightChild(wbCurrent.get(i + 1));
-                // Propagate bye/pre-completed winners immediately
-                if (wbCurrent.get(i).isCompleted())
-                    parent.setTeam1(wbCurrent.get(i).getWinner());
-                if (wbCurrent.get(i + 1).isCompleted())
-                    parent.setTeam2(wbCurrent.get(i + 1).getWinner());
-                if (autoCompleteBye(parent)) byeWBMatches.add(parent);
-                wbNext.add(parent);
-                allMatches.add(parent);
+                Match m = new Match(r);
+                m.setMatchId(matchId++);
+                m.setIsWinnersBracket(true);
+                m.setLeftChild(wbCurrent.get(i));
+                m.setRightChild(wbCurrent.get(i + 1));
+                wbNext.add(m);
+                allMatches.add(m);
             }
-            // Odd carry-over (shouldn't happen with power-of-2 bracket)
-            if (wbCurrent.size() % 2 == 1)
-                wbNext.add(wbCurrent.get(wbCurrent.size() - 1));
             wbRounds.add(wbNext);
             wbCurrent = wbNext;
         }
+        Match wbFinal = wbCurrent.get(0);
 
-        Match wbFinal = wbCurrent.isEmpty() ? null : wbCurrent.get(0);
-
-        // ----------------------------------------------------------------
-        // LOSERS BRACKET — round numbers start at numRounds + 1
-        //
-        // Algorithm (correct for any N in [4,32]):
-        //   Count real WB R1 matches → lb_alive losers enter LB.
-        //   For each subsequent WB round wr = 2..numRounds:
-        //     1. LB ELIM round: lb_alive teams play each other (floor/2 matches).
-        //        Survivors = ceil(lb_alive/2).
-        //     2. LB DROP round: WB-wr losers drop in.
-        //        Real losers from WB round wr = count of non-bye WB matches in round wr.
-        //        Each LB survivor is paired 1-to-1 with a WB loser.
-        //        If counts differ, the extra LB teams get a free pass (LB bye, not a match).
-        //        Matches = min(lb_survivors, wb_losers).
-        //        After drop: lb_alive = matches + |lb_survivors - wb_losers| (byes carry over).
-        //   After the final WB round's drop, 1 team remains → LB finalist → Grand Final.
-        // ----------------------------------------------------------------
-
-        // Count real WB matches per round
-        int[] wbRealMatches = new int[numRounds + 1]; // index 1..numRounds
-        for (int r = 1; r <= numRounds; r++) {
-            int cnt = 0;
-            for (Match m : wbRounds.get(r - 1)) {
-                if (!byeWBMatches.contains(m)) cnt++;
-            }
-            wbRealMatches[r] = cnt;
-        }
-
-        int lb_alive = wbRealMatches[1]; // losers from WB R1
-        int lbRoundNumber = numRounds;   // LB rounds start AFTER WB rounds
-
-        // Map from "LB round number" → list of LB matches in that round
+        int lbRoundNum = numRounds;
         Map<Integer, List<Match>> lbRoundMap = new LinkedHashMap<>();
-        // Map from WB round → list of LB DROP matches that receive those losers
-        Map<Integer, List<Match>> wbRoundToLBDrop = new HashMap<>();
+
+        lbRoundNum++;
+        List<Match> lbElim1 = new ArrayList<>();
+        List<Match> wbR1List = wbRounds.get(0);
+        for (int i = 0; i + 1 < wbR1List.size(); i += 2) {
+            Match lm = new Match(lbRoundNum);
+            lm.setMatchId(losersMatchId++);
+            winnerToLoserMatch.put(wbR1List.get(i),     lm);
+            winnerToLoserMatch.put(wbR1List.get(i + 1), lm);
+            lbElim1.add(lm);
+            losersBracketMatches.add(lm);
+            allMatches.add(lm);
+        }
+        lbRoundMap.put(lbRoundNum, lbElim1);
+
+        List<Match> lbSurvivors = new ArrayList<>(lbElim1);
 
         for (int wr = 2; wr <= numRounds; wr++) {
+            List<Match> wbThisRound = wbRounds.get(wr - 1);
 
-            // --- LB ELIM round ---
-            lbRoundNumber++;
-            List<Match> elimRound = new ArrayList<>();
-            int elimMatches  = lb_alive / 2;
-            int elimByes     = lb_alive % 2;  // odd team gets LB bye through elim
-
-            for (int i = 0; i < elimMatches; i++) {
-                Match lm = new Match(lbRoundNumber);
-                lm.setMatchId(losersMatchId++);
-                elimRound.add(lm);
-                losersBracketMatches.add(lm);
-                allMatches.add(lm);
-            }
-            if (!elimRound.isEmpty()) lbRoundMap.put(lbRoundNumber, elimRound);
-
-            int lb_survivors = elimMatches + elimByes;
-
-            // --- LB DROP round ---
-            lbRoundNumber++;
-            int wb_losers  = wbRealMatches[wr];
-            int dropMatches = Math.min(lb_survivors, wb_losers);
-            int lbByesInDrop = lb_survivors - dropMatches;  // LB teams with no WB opponent
-            // (wb_losers >= dropMatches always if lb_survivors <= wb_losers,
-            //  but we only create real match slots)
-
+            lbRoundNum++;
             List<Match> dropRound = new ArrayList<>();
-            for (int i = 0; i < dropMatches; i++) {
-                Match lm = new Match(lbRoundNumber);
+            for (int i = 0; i < wbThisRound.size() && i < lbSurvivors.size(); i++) {
+                Match lm = new Match(lbRoundNum);
                 lm.setMatchId(losersMatchId++);
+                lm.setLeftChild(lbSurvivors.get(i));
+                winnerToLoserMatch.put(wbThisRound.get(i), lm);
                 dropRound.add(lm);
                 losersBracketMatches.add(lm);
                 allMatches.add(lm);
             }
-            if (!dropRound.isEmpty()) {
-                lbRoundMap.put(lbRoundNumber, dropRound);
-                wbRoundToLBDrop.put(wr, dropRound);
-            }
+            lbRoundMap.put(lbRoundNum, dropRound);
 
-            lb_alive = dropMatches + lbByesInDrop;
-        }
-
-        // ----------------------------------------------------------------
-        // Wire LB elim rounds: each elim round's matches feed pairs from prev round
-        // ----------------------------------------------------------------
-        List<Integer> lbRoundNums = new ArrayList<>(lbRoundMap.keySet());
-        Collections.sort(lbRoundNums);
-
-        for (int ri = 1; ri < lbRoundNums.size(); ri++) {
-            int prevNum = lbRoundNums.get(ri - 1);
-            int currNum = lbRoundNums.get(ri);
-            List<Match> prev = lbRoundMap.get(prevNum);
-            List<Match> curr = lbRoundMap.get(currNum);
-            if (prev == null || curr == null) continue;
-
-            // Is this an elim round (fewer or equal matches) or a drop round?
-            // Determine by checking: same-size = drop, smaller = elim
-            if (curr.size() < prev.size()) {
-                // Elim: pairs from prev collapse into curr
-                for (int i = 0; i < curr.size(); i++) {
-                    int s1 = i * 2, s2 = i * 2 + 1;
-                    if (s1 < prev.size()) curr.get(i).setLeftChild(prev.get(s1));
-                    if (s2 < prev.size()) curr.get(i).setRightChild(prev.get(s2));
+            if (dropRound.size() > 1) {
+                lbRoundNum++;
+                List<Match> elimRound = new ArrayList<>();
+                for (int i = 0; i + 1 < dropRound.size(); i += 2) {
+                    Match lm = new Match(lbRoundNum);
+                    lm.setMatchId(losersMatchId++);
+                    lm.setLeftChild(dropRound.get(i));
+                    lm.setRightChild(dropRound.get(i + 1));
+                    elimRound.add(lm);
+                    losersBracketMatches.add(lm);
+                    allMatches.add(lm);
                 }
-            } else if (curr.size() == prev.size()) {
-                // Drop or same-size elim: 1-to-1, left child only (WB loser fills right)
-                for (int i = 0; i < curr.size() && i < prev.size(); i++) {
-                    curr.get(i).setLeftChild(prev.get(i));
-                }
+                lbRoundMap.put(lbRoundNum, elimRound);
+                lbSurvivors = elimRound;
             } else {
-                // curr bigger than prev — carry prev 1-to-1, extras have no left child
-                for (int i = 0; i < prev.size(); i++) {
-                    curr.get(i).setLeftChild(prev.get(i));
-                }
+                lbSurvivors = dropRound;
             }
         }
 
-        // ----------------------------------------------------------------
-        // Map WB matches → LB drop slots (winnerToLoserMatch)
-        // ----------------------------------------------------------------
-        // WB R1 losers → LB elim R1 (first LB round)
-        if (!lbRoundNums.isEmpty()) {
-            List<Match> lbElim1 = lbRoundMap.get(lbRoundNums.get(0));
-            if (lbElim1 != null) {
-                List<Match> wbR1 = wbRounds.get(0);
-                int slot = 0;
-                for (Match wm : wbR1) {
-                    if (byeWBMatches.contains(wm)) continue;
-                    // Each real WB R1 match produces one loser → fills one LB elim1 slot
-                    // Two WB R1 losers share one LB elim1 match
-                    int lbIdx = slot / 2;
-                    if (lbIdx < lbElim1.size()) {
-                        winnerToLoserMatch.put(wm, lbElim1.get(lbIdx));
-                    }
-                    slot++;
-                }
-            }
-        }
+        Match lbFinal = lbSurvivors.isEmpty() ? null : lbSurvivors.get(0);
 
-        // WB R2..numRounds-1 losers → their corresponding LB DROP rounds
-        for (int wr = 2; wr < numRounds; wr++) {
-            List<Match> dropRound = wbRoundToLBDrop.get(wr);
-            if (dropRound == null) continue;
-            List<Match> wbR = wbRounds.get(wr - 1);
-            int slot = 0;
-            for (Match wm : wbR) {
-                if (byeWBMatches.contains(wm)) continue;
-                if (slot < dropRound.size()) {
-                    winnerToLoserMatch.put(wm, dropRound.get(slot));
-                }
-                slot++;
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // GRAND FINAL
-        // ----------------------------------------------------------------
-        Match lbFinal = lbRoundNums.isEmpty() ? null
-                : lbRoundMap.get(lbRoundNums.get(lbRoundNums.size() - 1)) == null ? null
-                : lbRoundMap.get(lbRoundNums.get(lbRoundNums.size() - 1)).isEmpty() ? null
-                : lbRoundMap.get(lbRoundNums.get(lbRoundNums.size() - 1)).get(0);
-
-        lbRoundNumber++;
-        grandFinals = new Match(lbRoundNumber);
+        lbRoundNum++;
+        grandFinals = new Match(lbRoundNum);
         grandFinals.setMatchId(matchId);
-        if (wbFinal  != null) grandFinals.setLeftChild(wbFinal);
-        if (lbFinal  != null) grandFinals.setRightChild(lbFinal);
-        if (wbFinal  != null && wbFinal.isCompleted())  grandFinals.setTeam1(wbFinal.getWinner());
-        if (lbFinal  != null && lbFinal.isCompleted())  grandFinals.setTeam2(lbFinal.getWinner());
+        grandFinals.setLeftChild(wbFinal);
+        if (lbFinal != null) grandFinals.setRightChild(lbFinal);
         allMatches.add(grandFinals);
-        this.root = grandFinals;
-        this.totalRounds = lbRoundNumber;
+        this.root        = grandFinals;
+        this.totalRounds = lbRoundNum;
 
-        System.out.println("Double Elimination built: " + numTeams + " teams");
-        System.out.println("  WB rounds: " + numRounds + "  |  WB matches: " + (allMatches.size() - losersBracketMatches.size() - 1));
-        System.out.println("  LB rounds: " + lbRoundNums.size() + "  |  LB matches: " + losersBracketMatches.size());
-        System.out.println("  Expected LB matches: " + (numTeams - 2));
-        System.out.println("  Bye WB matches: " + byeWBMatches.size());
-        System.out.println("  GF: round " + lbRoundNumber);
+        System.out.println("DE built: n=" + n + " WBr=" + numRounds
+            + " LBmatches=" + losersBracketMatches.size()
+            + " total=" + allMatches.size());
+    }
+
+    // =========================================================================
+    // PLAY-IN DOUBLE ELIMINATION
+    //
+    //  10 teams → top 2 get byes to WB semis, bottom 8 play DE play-in → 2 survivors
+    //             join top 2 at a 4-team SE main bracket (Semis → Final)
+    //
+    //  20 teams → top 4 get byes to WB semis, bottom 16 play DE play-in → 4 survivors
+    //             join top 4 at an 8-team SE main bracket (QFs → Semis → Final)
+    //
+    //  General rule:
+    //    numByeTeams  = n == 10 ? 2 : 4
+    //    playInSize   = n - numByeTeams  (must be power-of-2)
+    //    numSurvivors = numByeTeams      (play-in survivors = bye count)
+    //    main bracket = (numByeTeams * 2)-team single elimination
+    // =========================================================================
+
+    private void buildPlayInDE(Team[] teams) {
+        int n = teams.length;
+        // Compute numByeTeams: find the largest power-of-2 that leaves a power-of-2 play-in size
+        // 6  → bye=2, playIn=4   (4-team DE play-in → 1 survivor + 1 bye = 2-team main)
+        // 10 → bye=2, playIn=8   (8-team DE play-in → 2 survivors + 2 byes = 4-team main)
+        // 12 → bye=4, playIn=8   (8-team DE play-in → 2 survivors + 4 byes = 6... use bye=4, pI=8 → 2 surv → 6 main → round up: bye=4, pi=8 → main=6 not power-of-2)
+        //   Better: bye=4, playIn=8 → survivors=4 → main=8. So numSurvivors = numByeTeams.
+        // 20 → bye=4, playIn=16  (16-team DE → 4 survivors + 4 byes = 8-team main)
+        // 24 → bye=8, playIn=16  (16-team DE → 4 survivors + 8 byes = 12 → not power-of-2)
+        //   Better: bye=8, playIn=16 → survivors=8 → main=16-team. Yes.
+        // General: playInSize must be power-of-2; numSurvivors = numByeTeams; main = 2*numByeTeams
+        int numByeTeams;
+        if      (n == 6)  numByeTeams = 2;
+        else if (n == 10) numByeTeams = 2;
+        else if (n == 12) numByeTeams = 4;
+        else if (n == 20) numByeTeams = 4;
+        else if (n == 24) numByeTeams = 8;
+        else              numByeTeams = (n == 10) ? 2 : 4;  // fallback
+        int playInSize   = n - numByeTeams;      // must be power-of-2
+        int numSurvivors = numByeTeams;          // survivors = bye count
+
+        allMatches.clear();
+        losersBracketMatches = new ArrayList<>();
+        playInMatches        = new ArrayList<>();
+        mainBracketMatches   = new ArrayList<>();
+        playInSlots          = new ArrayList<>();
+        winnerToLoserMatch.clear();
+
+        // Seeds 1-4 (index 0-3) get byes
+        byeTeams = Arrays.copyOf(teams, numByeTeams);
+
+        // Seeds 5-N (index 4-N-1) enter the DE play-in
+        Team[] playInTeams = Arrays.copyOfRange(teams, numByeTeams, n);
+
+        int matchId       = 1;
+        int losersMatchId = 1000;
+
+        // ── BUILD DE PLAY-IN ─────────────────────────────────────────────
+        // Standard DE for playInTeams (power-of-2: 8 or 16)
+        int piN      = playInTeams.length;
+        int piRounds = (int)(Math.log(piN) / Math.log(2));
+        Team[] piSlots = seededSlots(playInTeams, piN);
+
+        // Play-In WB Round 1
+        List<Match> piWbR1 = new ArrayList<>();
+        for (int i = 0; i < piN; i += 2) {
+            Match m = new Match(1);
+            m.setMatchId(matchId++);
+            m.setIsWinnersBracket(true);
+            m.setIsPlayIn(true);
+            m.setTeam1(piSlots[i]);
+            m.setTeam2(piSlots[i + 1]);
+            piWbR1.add(m);
+            playInMatches.add(m);
+            allMatches.add(m);
+        }
+
+        List<List<Match>> piWbRounds = new ArrayList<>();
+        piWbRounds.add(piWbR1);
+        List<Match> piWbCurrent = new ArrayList<>(piWbR1);
+
+        for (int r = 2; r <= piRounds; r++) {
+            List<Match> piWbNext = new ArrayList<>();
+            for (int i = 0; i + 1 < piWbCurrent.size(); i += 2) {
+                Match m = new Match(r);
+                m.setMatchId(matchId++);
+                m.setIsWinnersBracket(true);
+                m.setIsPlayIn(true);
+                m.setLeftChild(piWbCurrent.get(i));
+                m.setRightChild(piWbCurrent.get(i + 1));
+                piWbNext.add(m);
+                playInMatches.add(m);
+                allMatches.add(m);
+            }
+            piWbRounds.add(piWbNext);
+            piWbCurrent = piWbNext;
+        }
+        Match piWbFinal = piWbCurrent.get(0);
+        this.playInWinnersRounds = piRounds;
+
+        // Play-In Losers Bracket
+        int lbRoundNum = piRounds;
+
+        lbRoundNum++;
+        List<Match> piLbElim1 = new ArrayList<>();
+        List<Match> piWbR1List = piWbRounds.get(0);
+        for (int i = 0; i + 1 < piWbR1List.size(); i += 2) {
+            Match lm = new Match(lbRoundNum);
+            lm.setMatchId(losersMatchId++);
+            lm.setIsPlayIn(true);
+            winnerToLoserMatch.put(piWbR1List.get(i),     lm);
+            winnerToLoserMatch.put(piWbR1List.get(i + 1), lm);
+            piLbElim1.add(lm);
+            losersBracketMatches.add(lm);
+            playInMatches.add(lm);
+            allMatches.add(lm);
+        }
+
+        List<Match> piLbSurvivors = new ArrayList<>(piLbElim1);
+
+        for (int wr = 2; wr <= piRounds; wr++) {
+            List<Match> wbThisRound = piWbRounds.get(wr - 1);
+
+            lbRoundNum++;
+            List<Match> dropRound = new ArrayList<>();
+            for (int i = 0; i < wbThisRound.size() && i < piLbSurvivors.size(); i++) {
+                Match lm = new Match(lbRoundNum);
+                lm.setMatchId(losersMatchId++);
+                lm.setIsPlayIn(true);
+                lm.setLeftChild(piLbSurvivors.get(i));
+                winnerToLoserMatch.put(wbThisRound.get(i), lm);
+                dropRound.add(lm);
+                losersBracketMatches.add(lm);
+                playInMatches.add(lm);
+                allMatches.add(lm);
+            }
+
+            if (dropRound.size() > 1) {
+                lbRoundNum++;
+                List<Match> elimRound = new ArrayList<>();
+                for (int i = 0; i + 1 < dropRound.size(); i += 2) {
+                    Match lm = new Match(lbRoundNum);
+                    lm.setMatchId(losersMatchId++);
+                    lm.setIsPlayIn(true);
+                    lm.setLeftChild(dropRound.get(i));
+                    lm.setRightChild(dropRound.get(i + 1));
+                    elimRound.add(lm);
+                    losersBracketMatches.add(lm);
+                    playInMatches.add(lm);
+                    allMatches.add(lm);
+                }
+                piLbSurvivors = elimRound;
+            } else {
+                piLbSurvivors = dropRound;
+            }
+        }
+        Match piLbFinal = piLbSurvivors.isEmpty() ? null : piLbSurvivors.get(0);
+
+        // Play-In Grand Final: WB finalist vs LB finalist
+        lbRoundNum++;
+        Match piGrandFinal = new Match(lbRoundNum);
+        piGrandFinal.setMatchId(losersMatchId++);
+        piGrandFinal.setIsPlayIn(true);
+        piGrandFinal.setIsPlayInGrandFinal(true);
+        piGrandFinal.setLeftChild(piWbFinal);
+        if (piLbFinal != null) piGrandFinal.setRightChild(piLbFinal);
+        playInMatches.add(piGrandFinal);
+        allMatches.add(piGrandFinal);
+
+        // ── BUILD MAIN BRACKET ───────────────────────────────────────────────
+        // Main bracket is a standard SE with (numByeTeams * 2) slots:
+        //   numByeTeams bye seeds (pre-seeded as team1) + numByeTeams play-in survivors (fill team2)
+        // For 10-team (2 byes): 4-slot SE → 2 semis → 1 final
+        // For 20-team (4 byes): 8-slot SE → 4 semis → 2 FF → 1 champ
+
+        int mainRoundBase = lbRoundNum + 1;
+        int mainSize      = numByeTeams * 2;   // 4 or 8
+
+        // Build round-1 main bracket matches — each pairs 1 bye seed vs 1 PI survivor (TBD)
+        // Seeding: top seed faces weakest survivor (reverse pairing)
+        List<Match> mainCurrent = new ArrayList<>();
+        playInSlots = new ArrayList<>();
+
+        // byePairing maps match index → bye seed index (best seed vs worst survivor)
+        // For 2 byes: match0 = seed1 vs PI-survivor, match1 = seed2 vs PI-survivor
+        // For 4 byes: match0 = seed1, match1 = seed4, match2 = seed2, match3 = seed3
+        // For 8 byes: match0=s1, match1=s8, match2=s4, match3=s5, match4=s2, match5=s7, match6=s3, match7=s6
+        int[] byePairing;
+        if (numByeTeams == 2) {
+            byePairing = new int[]{0, 1};
+        } else if (numByeTeams == 4) {
+            byePairing = new int[]{0, 3, 1, 2};
+        } else if (numByeTeams == 8) {
+            byePairing = new int[]{0, 7, 3, 4, 1, 6, 2, 5};
+        } else {
+            byePairing = new int[numByeTeams];
+            for (int i = 0; i < numByeTeams; i++) byePairing[i] = i;
+        }
+
+        for (int i = 0; i < numByeTeams; i++) {
+            Match sf = new Match(mainRoundBase);
+            sf.setMatchId(matchId++);
+            sf.setIsMainBracket(true);
+            sf.setTeam1(byeTeams[byePairing[i]]); // bye seed waits here
+            // team2 filled by play-in survivor
+            mainCurrent.add(sf);
+            playInSlots.add(sf);
+            mainBracketMatches.add(sf);
+            allMatches.add(sf);
+        }
+
+        // Wire play-in survivors → main bracket round-1 slots
+        // For 2-bye: piGrandFinal → slot0, piLbFinal → slot1
+        // For 4-bye: piGrandFinal → slot0, piLbFinal → slot1, + 2 more from LB semis
+        // For 8-bye: piGrandFinal → slot0, piLbFinal → slot1, + 6 more from LB brackets
+        piGrandFinal.setMainBracketSlot(mainCurrent.get(0));
+        if (piLbFinal != null && mainCurrent.size() > 1)
+            piLbFinal.setMainBracketSlot(mainCurrent.get(1));
+
+        if (numByeTeams >= 4) {
+            // Wire additional LB exits → remaining slots
+            wireAdditionalPlayInSurvivorSlots(piWbRounds, piLbSurvivors, mainCurrent, piGrandFinal, piLbFinal);
+        }
+
+        // Build remaining main bracket rounds (standard SE from mainCurrent)
+        int mainRound = mainRoundBase + 1;
+        while (mainCurrent.size() > 1) {
+            List<Match> mainNext = new ArrayList<>();
+            for (int i = 0; i + 1 < mainCurrent.size(); i += 2) {
+                Match m = new Match(mainRound);
+                m.setMatchId(matchId++);
+                m.setIsMainBracket(true);
+                m.setLeftChild(mainCurrent.get(i));
+                m.setRightChild(mainCurrent.get(i + 1));
+                if (mainCurrent.get(i).isCompleted())
+                    m.setTeam1(mainCurrent.get(i).getWinner());
+                if (mainCurrent.get(i + 1).isCompleted())
+                    m.setTeam2(mainCurrent.get(i + 1).getWinner());
+                mainNext.add(m);
+                mainBracketMatches.add(m);
+                allMatches.add(m);
+            }
+            mainCurrent = mainNext;
+            mainRound++;
+        }
+
+        grandFinals = mainCurrent.isEmpty() ? null : mainCurrent.get(0);
+        this.root        = grandFinals;
+        this.totalRounds = mainRound - 1;
+
+        System.out.println("Play-In DE built: n=" + n
+            + " byeTeams=" + numByeTeams
+            + " playInSize=" + playInSize
+            + " mainSize=" + mainSize
+            + " playInMatches=" + playInMatches.size()
+            + " mainMatches=" + mainBracketMatches.size()
+            + " total=" + allMatches.size());
+    }
+
+    /**
+     * Wires the remaining play-in survivor slots (mainR1[2] and mainR1[3])
+     * to the correct play-in bracket exits. Only called for the 4-bye (20-team) case.
+     *
+     * For a 16-team play-in we need 4 survivors:
+     *   - piWbFinal winner  (slot 0) ← already wired
+     *   - piLbFinal winner  (slot 1) ← already wired
+     *   - LB semi exits     (slots 2, 3) ← wired here
+     */
+    private void wireAdditionalPlayInSurvivorSlots(
+            List<List<Match>> piWbRounds,
+            List<Match> finalLbSurvivors,
+            List<Match> semiFinals,
+            Match piGrandFinal,
+            Match piLbFinal) {
+
+        // For an 8-team play-in (3 WB rounds), there are exactly 2 exits:
+        // WB final winner + LB final winner → fills slots 0 and 1.
+        // Slots 2 and 3 need to come from the SEMI-final round of the play-in.
+
+        // Collect all play-in LB matches sorted by round descending
+        List<Match> lbSorted = new ArrayList<>(losersBracketMatches);
+        lbSorted.removeIf(m -> !m.isPlayIn());
+        lbSorted.sort((a, b) -> Integer.compare(b.getRound(), a.getRound()));
+
+        // The LB final is the first; the LB semi-finals are the next tier
+        // We need 2 more survivors for semiFinals[2] and semiFinals[3]
+        // These come from the LB one round before the LB final
+        if (semiFinals.size() >= 4) {
+            // Find LB matches that feed into piLbFinal
+            List<Match> lbSemiSlots = new ArrayList<>();
+            for (Match lm : lbSorted) {
+                if (lm == piLbFinal) continue;
+                if (piLbFinal != null) {
+                    if (lm == piLbFinal.getLeftChild() || lm == piLbFinal.getRightChild()) {
+                        lbSemiSlots.add(lm);
+                    }
+                }
+            }
+
+            // For 16-team play-in there are 2 LB semi matches → feed slots 2 and 3
+            if (lbSemiSlots.size() >= 2) {
+                lbSemiSlots.get(0).setMainBracketSlot(semiFinals.get(2));
+                lbSemiSlots.get(1).setMainBracketSlot(semiFinals.get(3));
+            } else if (lbSemiSlots.size() == 1) {
+                // 8-team play-in: only 2 true survivors; use WB semifinal exits
+                List<Match> wbSemis = piWbRounds.size() >= 2
+                        ? piWbRounds.get(piWbRounds.size() - 2) : new ArrayList<>();
+                if (wbSemis.size() >= 2) {
+                    wbSemis.get(0).setMainBracketSlot(semiFinals.get(2));
+                    wbSemis.get(1).setMainBracketSlot(semiFinals.get(3));
+                } else if (wbSemis.size() == 1) {
+                    wbSemis.get(0).setMainBracketSlot(semiFinals.get(2));
+                    lbSemiSlots.get(0).setMainBracketSlot(semiFinals.get(3));
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // PLAY-IN SINGLE ELIMINATION
+    //
+    //  Odd/non-power-of-2 team counts (12, 20, 24) use a play-in stage to
+    //  reduce to the nearest power-of-2, then run a standard SE main bracket.
+    //
+    //  12 teams → next power-of-2 below is 8.  4 teams play-in (2 matches),
+    //             4 winners join 8 bye seeds for an 8-team SE main bracket.
+    //             Actually: 12 = 8 + 4 extra.  We give 4 byes to top seeds,
+    //             play-in the bottom 8 to produce 4 survivors → 8-team SE.
+    //
+    //  20 teams → 16-team main bracket.  4 extra teams need a play-in.
+    //             Top 16 get byes; bottom 4 play-in to produce 2 survivors
+    //             who fill the last 2 slots of a 16-team SE bracket.
+    //             Simpler: top 12 bye, bottom 8 play-in → 4 survivors → 16-team SE.
+    //
+    //  24 teams → 16-team main bracket.  Top 8 bye, bottom 16 play-in → 8 survivors.
+    //
+    //  General rule:
+    //    mainSize  = largest power-of-2 ≤ n that satisfies mainSize >= n/2
+    //    byeCount  = mainSize - (n - mainSize)   [seeds that skip play-in]
+    //    playInCount = n - byeCount              [teams that must play-in]
+    //    survivors = mainSize - byeCount         [play-in winners needed]
+    //    playInRounds = log2(playInCount/survivors)  [SE rounds in play-in]
+    // =========================================================================
+
+    private void buildPlayInSE(Team[] teams) {
+        int n = teams.length;
+
+        // Special cases for 10-team and 20-team play-in SE:
+        //   10 teams → top 2 bye, 8 play-in → 2 survivors → 4-team main (Semis + Final)
+        //   20 teams → top 4 bye, 16 play-in → 4 survivors → 8-team main (QF + Semis + Final)
+        int mainSize, byeCount, playInCount, survivors;
+        if (n == 10) {
+            mainSize    = 4;
+            byeCount    = 2;
+            playInCount = 8;
+            survivors   = 2;
+        } else if (n == 20) {
+            mainSize    = 8;
+            byeCount    = 4;
+            playInCount = 16;
+            survivors   = 4;
+        } else {
+            // General formula: smallest power-of-2 >= ceil(n/2)
+            mainSize = 1;
+            while (mainSize < (int) Math.ceil(n / 2.0)) mainSize <<= 1;
+            survivors   = mainSize - (n - mainSize); // 2*mainSize - n
+            byeCount    = survivors;
+            playInCount = n - byeCount;
+        }
+
+        allMatches.clear();
+        losersBracketMatches = new ArrayList<>();
+        playInMatches        = new ArrayList<>();
+        mainBracketMatches   = new ArrayList<>();
+        playInSlots          = new ArrayList<>();
+        winnerToLoserMatch.clear();
+
+        byeTeams = Arrays.copyOf(teams, byeCount);
+        Team[] playInTeams = Arrays.copyOfRange(teams, byeCount, n);
+
+        int matchId = 1;
+
+        // ── PLAY-IN: standard single elimination ────────────────────────────
+        // playInTeams.length is always a power-of-2 and == survivors * 2
+        Team[] piSlots = seededSlots(playInTeams, playInTeams.length);
+
+        List<Match> piCurrent = new ArrayList<>();
+        for (int i = 0; i < playInTeams.length; i += 2) {
+            Match m = new Match(1);
+            m.setMatchId(matchId++);
+            m.setIsWinnersBracket(true);
+            m.setIsPlayIn(true);
+            m.setTeam1(piSlots[i]);
+            m.setTeam2(piSlots[i + 1]);
+            piCurrent.add(m);
+            playInMatches.add(m);
+            allMatches.add(m);
+        }
+
+        int piRound = 2;
+        while (piCurrent.size() > survivors) {
+            List<Match> piNext = new ArrayList<>();
+            for (int i = 0; i + 1 < piCurrent.size(); i += 2) {
+                Match m = new Match(piRound);
+                m.setMatchId(matchId++);
+                m.setIsWinnersBracket(true);
+                m.setIsPlayIn(true);
+                m.setLeftChild(piCurrent.get(i));
+                m.setRightChild(piCurrent.get(i + 1));
+                piNext.add(m);
+                playInMatches.add(m);
+                allMatches.add(m);
+            }
+            piCurrent = piNext;
+            piRound++;
+        }
+        // piCurrent now holds exactly 'survivors' play-in final matches
+
+        int piRoundsUsed = piRound - 1;
+
+        // ── MAIN BRACKET ────────────────────────────────────────────────────
+        // Slots: bye seeds first, then play-in survivors
+        // We build a seeded 'mainSize'-slot array:
+        //   slots[0..byeCount-1]   = bye seeds (top seeds)
+        //   slots[byeCount..]      = null (filled by play-in survivors later)
+        Team[] mainSlotTeams = new Team[mainSize];
+        for (int i = 0; i < byeCount; i++) mainSlotTeams[i] = byeTeams[i];
+        // play-in survivor slots remain null
+
+        // Use seeded bracket ordering for mainSize
+        int[] seedOrder = buildSeedOrder(mainSize);
+        // Map seed position → mainSlotTeam (null = play-in survivor TBD)
+        Team[] orderedSlots = new Team[mainSize];
+        for (int i = 0; i < mainSize; i++) {
+            int s = seedOrder[i];
+            orderedSlots[i] = (s <= mainSize && s - 1 < mainSlotTeams.length)
+                               ? mainSlotTeams[s - 1] : null;
+        }
+
+        // Collect which ordered-slot indices are null (play-in survivor slots)
+        List<Integer> piSlotIndices = new ArrayList<>();
+        for (int i = 0; i < mainSize; i++) {
+            if (orderedSlots[i] == null) piSlotIndices.add(i);
+        }
+
+        int mainRound = piRoundsUsed + 1;
+
+        // Build main bracket round 1 matches
+        List<Match> mainCurrent = new ArrayList<>();
+        List<Match> mainR1 = new ArrayList<>();
+        // We track which R1 matches have a play-in survivor slot
+        Map<Integer, Match> piSlotIndexToMatch = new HashMap<>();
+
+        for (int i = 0; i < mainSize; i += 2) {
+            Match m = new Match(mainRound);
+            m.setMatchId(matchId++);
+            m.setIsMainBracket(true);
+            Team t1 = orderedSlots[i];
+            Team t2 = orderedSlots[i + 1];
+            if (t1 != null) m.setTeam1(t1);
+            if (t2 != null) m.setTeam2(t2);
+            // Track null slots for wiring play-in survivors
+            if (t1 == null) piSlotIndexToMatch.put(i, m);     // team1 slot
+            if (t2 == null) piSlotIndexToMatch.put(i + 1, m); // team2 slot
+            // Do NOT autoCompleteBye here — team2 slot is still waiting for a play-in survivor
+            mainCurrent.add(m);
+            mainR1.add(m);
+            mainBracketMatches.add(m);
+            allMatches.add(m);
+        }
+        mainRound++;
+
+        // Wire play-in survivor matches → main bracket R1 slots
+        // piSlotIndices[k] → piCurrent[k] (kth survivor match fills kth null slot)
+        for (int k = 0; k < piSlotIndices.size() && k < piCurrent.size(); k++) {
+            int slotIdx = piSlotIndices.get(k);
+            Match piWinner = piCurrent.get(k);
+            Match target = piSlotIndexToMatch.get(slotIdx);
+            if (target != null) {
+                piWinner.setMainBracketSlot(target);
+                // Mark which "team" slot (1 or 2) this survivor fills
+                // We store it as team1 or team2 being null
+                playInSlots.add(target);
+            }
+        }
+
+        // Build remaining main bracket rounds
+        while (mainCurrent.size() > 1) {
+            List<Match> mainNext = new ArrayList<>();
+            for (int i = 0; i + 1 < mainCurrent.size(); i += 2) {
+                Match m = new Match(mainRound);
+                m.setMatchId(matchId++);
+                m.setIsMainBracket(true);
+                m.setLeftChild(mainCurrent.get(i));
+                m.setRightChild(mainCurrent.get(i + 1));
+                if (mainCurrent.get(i).isCompleted())
+                    m.setTeam1(mainCurrent.get(i).getWinner());
+                if (mainCurrent.get(i + 1).isCompleted())
+                    m.setTeam2(mainCurrent.get(i + 1).getWinner());
+                // Do NOT autoCompleteBye — both slots must be earned, not auto-advanced
+                mainNext.add(m);
+                mainBracketMatches.add(m);
+                allMatches.add(m);
+            }
+            mainCurrent = mainNext;
+            mainRound++;
+        }
+
+        grandFinals = mainCurrent.isEmpty() ? null : mainCurrent.get(0);
+        this.root        = grandFinals;
+        this.totalRounds = mainRound - 1;
+
+        System.out.println("Play-In SE built: n=" + n
+            + " byeCount=" + byeCount
+            + " playInCount=" + playInCount
+            + " survivors=" + survivors
+            + " mainSize=" + mainSize
+            + " playInMatches=" + playInMatches.size()
+            + " mainMatches=" + mainBracketMatches.size()
+            + " total=" + allMatches.size());
     }
 
     // =========================================================================
@@ -400,9 +823,40 @@ public class TournamentBracket {
     }
 
     // =========================================================================
-    // HELPER: auto-complete a bye match (one team present, other null)
-    // Returns true if it was a bye.
+    // SEEDING HELPERS
     // =========================================================================
+
+    private Team[] seededSlots(Team[] teams, int bracketSize) {
+        int[] seedInSlot = buildSeedOrder(bracketSize);
+        Team[] slots = new Team[bracketSize];
+        for (int i = 0; i < bracketSize; i++) {
+            int seedNum = seedInSlot[i];
+            if (seedNum <= teams.length) slots[i] = teams[seedNum - 1];
+        }
+        return slots;
+    }
+
+    private int[] buildSeedOrder(int size) {
+        List<Integer> result = buildSeedOrderList(size);
+        int[] arr = new int[size];
+        for (int i = 0; i < size; i++) arr[i] = result.get(i);
+        return arr;
+    }
+
+    private List<Integer> buildSeedOrderList(int n) {
+        if (n == 1) {
+            List<Integer> base = new ArrayList<>();
+            base.add(1);
+            return base;
+        }
+        List<Integer> half = buildSeedOrderList(n / 2);
+        List<Integer> result = new ArrayList<>();
+        for (int h : half) {
+            result.add(h);
+            result.add(n + 1 - h);
+        }
+        return result;
+    }
 
     private boolean autoCompleteBye(Match m) {
         if (m.getTeam1() != null && m.getTeam2() == null) {
@@ -437,13 +891,46 @@ public class TournamentBracket {
         return result;
     }
 
+    /** Returns only the WB matches inside the play-in sub-bracket for the given round. */
+    public List<Match> getPlayInWinnersMatchesByRound(int round) {
+        List<Match> result = new ArrayList<>();
+        for (Match m : playInMatches)
+            if (m.getRound() == round && m.isWinnersBracket() && !m.isPlayInGrandFinal())
+                result.add(m);
+        result.sort(Comparator.comparingInt(Match::getMatchId));
+        return result;
+    }
+
+    /** Returns LB matches inside the play-in sub-bracket for a given round. */
+    public List<Match> getPlayInLosersMatchesByRound(int round) {
+        List<Match> result = new ArrayList<>();
+        for (Match m : playInMatches)
+            if (m.getRound() == round && !m.isWinnersBracket() && !m.isPlayInGrandFinal())
+                result.add(m);
+        result.sort(Comparator.comparingInt(Match::getMatchId));
+        return result;
+    }
+
+    public Match       getPlayInGrandFinal() {
+        for (Match m : playInMatches) if (m.isPlayInGrandFinal()) return m;
+        return null;
+    }
+
     public List<Match> getAllMatches()            { return allMatches; }
     public List<Match> getLosersBracketMatches()  { return losersBracketMatches; }
+    public List<Match> getPlayInMatches()         { return playInMatches; }
+    public List<Match> getMainBracketMatches()    { return mainBracketMatches; }
+    public Team[]      getByeTeams()              { return byeTeams; }
+    public List<Match> getPlayInSlots()           { return playInSlots; }
     public Match       getGrandFinals()           { return grandFinals; }
     public int         getTotalRounds()           { return totalRounds; }
     public Team[]      getTeams()                 { return teams; }
     public Match       getChampionship()          { return root; }
     public ScoreMatrix getScoreMatrix()           { return scoreMatrix; }
+    public int         getPlayInWinnersRounds()   { return playInWinnersRounds; }
+    public int         getWinnersRounds() {
+        return (int) Math.ceil(Math.log(Math.max(teams.length, 2)) / Math.log(2));
+    }
 
     public List<Match> getWinnersBracketMatches() {
         List<Match> r = new ArrayList<>();
@@ -471,6 +958,11 @@ public class TournamentBracket {
         return done + "/" + total + " matches completed";
     }
 
+    public boolean isPlayInFormat() {
+        return tournamentType == TournamentType.PLAY_IN_DOUBLE_ELIMINATION
+            || tournamentType == TournamentType.PLAY_IN_SINGLE_ELIMINATION;
+    }
+
     public Team getTournamentWinner() {
         if (tournamentType == TournamentType.ROUND_ROBIN
                 || tournamentType == TournamentType.SWISS
@@ -484,7 +976,15 @@ public class TournamentBracket {
             }
             return champ;
         }
-        return (root != null && root.isCompleted()) ? root.getWinner() : null;
+        if (root == null || !root.isCompleted()) return null;
+        if (tournamentType == TournamentType.DOUBLE_ELIMINATION
+                || tournamentType == TournamentType.PLAY_IN_DOUBLE_ELIMINATION
+                || tournamentType == TournamentType.PLAY_IN_SINGLE_ELIMINATION) {
+            if (grandFinals == null) return null;
+            if (grandFinals.getTeam1() == null || grandFinals.getTeam2() == null) return null;
+        }
+        if (root.getTeam1() == null || root.getTeam2() == null) return null;
+        return root.getWinner();
     }
 
     // =========================================================================
@@ -503,6 +1003,10 @@ public class TournamentBracket {
                 || tournamentType == TournamentType.DOUBLE_ELIMINATION)
             propagateWinnerUp(match, winner);
 
+        if (tournamentType == TournamentType.PLAY_IN_DOUBLE_ELIMINATION
+                || tournamentType == TournamentType.PLAY_IN_SINGLE_ELIMINATION)
+            propagatePlayIn(match, winner);
+
         System.out.println("✓ Recorded: " + match);
     }
 
@@ -510,32 +1014,115 @@ public class TournamentBracket {
         Team loser = (currentMatch.getTeam1() == winner)
                      ? currentMatch.getTeam2() : currentMatch.getTeam1();
 
-        // Feed loser into LB (double elim only, and only for real 2-team matches)
         if (tournamentType == TournamentType.DOUBLE_ELIMINATION && loser != null
                 && currentMatch.getTeam1() != null && currentMatch.getTeam2() != null) {
             Match lbSlot = winnerToLoserMatch.get(currentMatch);
             if (lbSlot != null && !lbSlot.isCompleted()) {
                 if (lbSlot.getTeam1() == null) {
                     lbSlot.setTeam1(loser);
-                    System.out.println("→ Loser " + loser.getName() + " → LB R" + lbSlot.getRound());
                 } else if (lbSlot.getTeam2() == null && lbSlot.getTeam1() != loser) {
                     lbSlot.setTeam2(loser);
-                    System.out.println("→ Loser " + loser.getName() + " → LB R" + lbSlot.getRound());
                 }
             }
         }
 
-        // Advance winner to next match
         for (Match m : allMatches) {
             if (m.getLeftChild() == currentMatch) {
                 m.setTeam1(winner);
-                System.out.println("→ Winner " + winner.getName() + " → match " + m.getMatchId());
                 if (m.isCompleted()) propagateWinnerUp(m, m.getWinner());
                 return;
             } else if (m.getRightChild() == currentMatch) {
                 m.setTeam2(winner);
-                System.out.println("→ Winner " + winner.getName() + " → match " + m.getMatchId());
                 if (m.isCompleted()) propagateWinnerUp(m, m.getWinner());
+                return;
+            }
+        }
+    }
+
+    /**
+     * Propagation for Play-In DE format.
+     *
+     * Three paths:
+     *  1. Play-in WB/LB match → loser goes to LB slot (same as standard DE)
+     *  2. Play-in match winner advances to next play-in match via child refs
+     *  3. Play-in survivor (GF winner or LB final winner) → fills a main bracket semifinal slot
+     */
+    private void propagatePlayIn(Match currentMatch, Team winner) {
+        Team loser = (currentMatch.getTeam1() == winner)
+                     ? currentMatch.getTeam2() : currentMatch.getTeam1();
+
+        // Feed loser into play-in LB if applicable
+        if (loser != null && currentMatch.isPlayIn() && !currentMatch.isPlayInGrandFinal()) {
+            Match lbSlot = winnerToLoserMatch.get(currentMatch);
+            if (lbSlot != null && !lbSlot.isCompleted()) {
+                if (lbSlot.getTeam1() == null) {
+                    lbSlot.setTeam1(loser);
+                    System.out.println("→ PI Loser " + loser.getName() + " → LB R" + lbSlot.getRound());
+                } else if (lbSlot.getTeam2() == null && lbSlot.getTeam1() != loser) {
+                    lbSlot.setTeam2(loser);
+                    System.out.println("→ PI Loser " + loser.getName() + " → LB R" + lbSlot.getRound());
+                }
+            }
+        }
+
+        // Advance winner to next play-in match via child links
+        for (Match m : playInMatches) {
+            if (m.getLeftChild() == currentMatch && m.getTeam1() == null) {
+                m.setTeam1(winner);
+                System.out.println("→ PI Winner " + winner.getName() + " → PI match " + m.getMatchId());
+                if (m.isCompleted()) propagatePlayIn(m, m.getWinner());
+                return;
+            } else if (m.getRightChild() == currentMatch && m.getTeam2() == null) {
+                m.setTeam2(winner);
+                System.out.println("→ PI Winner " + winner.getName() + " → PI match " + m.getMatchId());
+                if (m.isCompleted()) propagatePlayIn(m, m.getWinner());
+                return;
+            }
+        }
+
+        // If this match has a main bracket slot, send winner there
+        Match mainSlot = currentMatch.getMainBracketSlot();
+        if (mainSlot != null) {
+            if (mainSlot.getTeam1() == null) {
+                mainSlot.setTeam1(winner);
+                System.out.println("→ PI Survivor " + winner.getName()
+                    + " → Main match " + mainSlot.getMatchId() + " (team1)");
+            } else if (mainSlot.getTeam2() == null) {
+                mainSlot.setTeam2(winner);
+                System.out.println("→ PI Survivor " + winner.getName()
+                    + " → Main match " + mainSlot.getMatchId() + " (team2)");
+            }
+            // Once main bracket match has both teams, propagate inside main bracket
+            propagateMainBracket(mainSlot);
+            return;
+        }
+
+        // Advance winner inside main bracket via child links
+        for (Match m : mainBracketMatches) {
+            if (m.getLeftChild() == currentMatch) {
+                m.setTeam1(winner);
+                propagateMainBracket(m);
+                return;
+            } else if (m.getRightChild() == currentMatch) {
+                m.setTeam2(winner);
+                propagateMainBracket(m);
+                return;
+            }
+        }
+    }
+
+    /** Propagates a completed main-bracket match forward to the next main-bracket match. */
+    private void propagateMainBracket(Match current) {
+        if (!current.isCompleted()) return;
+        Team w = current.getWinner();
+        for (Match m : mainBracketMatches) {
+            if (m.getLeftChild() == current && m.getTeam1() == null) {
+                m.setTeam1(w);
+                propagateMainBracket(m);
+                return;
+            } else if (m.getRightChild() == current && m.getTeam2() == null) {
+                m.setTeam2(w);
+                propagateMainBracket(m);
                 return;
             }
         }
@@ -558,7 +1145,15 @@ public class TournamentBracket {
             }
             System.out.println("\nLOSERS BRACKET:");
             for (Match m : losersBracketMatches) System.out.println("  R" + m.getRound() + ": " + m);
-            if (grandFinals != null) { System.out.println("\nGRAND FINAL:\n  " + grandFinals); }
+            if (grandFinals != null) System.out.println("\nGRAND FINAL:\n  " + grandFinals);
+        } else if (tournamentType == TournamentType.PLAY_IN_DOUBLE_ELIMINATION
+                || tournamentType == TournamentType.PLAY_IN_SINGLE_ELIMINATION) {
+            String tag = tournamentType == TournamentType.PLAY_IN_SINGLE_ELIMINATION
+                         ? "PLAY-IN BRACKET (SE)" : "PLAY-IN BRACKET (DE)";
+            System.out.println("\n── " + tag + " ──");
+            for (Match m : playInMatches) System.out.println("  R" + m.getRound() + ": " + m);
+            System.out.println("\n── MAIN BRACKET ──");
+            for (Match m : mainBracketMatches) System.out.println("  R" + m.getRound() + ": " + m);
         } else {
             for (int r = 1; r <= totalRounds; r++) {
                 List<Match> ms = getMatchesByRound(r);
