@@ -1882,117 +1882,190 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     private void displayRoundRobin() {
         VBox container = new VBox(15);
         container.setPadding(new Insets(20));
-        container.setStyle("-fx-background-color: #f5f5f5;");
-        Label title = new Label("ROUND ROBIN - Standings & Results");
+        container.setStyle("-fx-background-color: #040D43;");
+
+        Label title = new Label("ROUND ROBIN – Standings & Results");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 16));
-        title.setTextFill(Color.web("#2c3e50"));
+        title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","PD","Win %"}, "#3498db");
+        // ── Standings table ───────────────────────────────────────────────
+        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","PD","Win %"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
-        sorted.sort((a, b) -> Integer.compare(b.getWins(), a.getWins()));
+        sorted.sort((a, b) -> {
+            int w = Integer.compare(b.getWins(), a.getWins());
+            return w != 0 ? w : Integer.compare(b.getPointDifference(), a.getPointDifference());
+        });
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
-            grid.add(new Label(String.valueOf(i + 1)), 0, i + 1);
-            grid.add(new Label(t.getName()), 1, i + 1);
-            grid.add(new Label(String.valueOf(t.getWins())), 2, i + 1);
-            grid.add(new Label(String.valueOf(t.getLosses())), 3, i + 1);
-            grid.add(new Label(String.valueOf(t.getPointDifference())), 4, i + 1);
-            grid.add(new Label(String.format("%.1f%%", t.getWinPercentage())), 5, i + 1);
+            addStandingsRow(grid, i + 1, new String[]{
+                String.valueOf(i + 1), t.getName(),
+                String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
+                String.valueOf(t.getPointDifference()),
+                String.format("%.1f%%", t.getWinPercentage())
+            });
         }
         container.getChildren().add(grid);
-        Label matchesLabel = new Label("ALL MATCHES");
-        matchesLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        container.getChildren().add(matchesLabel);
-        VBox matchesList = new VBox(5);
-        for (Match m : tournament.getAllMatches()) matchesList.getChildren().add(createMatchResultRow(m));
-        container.getChildren().add(matchesList);
-        ScrollPane sp = new ScrollPane(container); sp.setFitToWidth(true);
+
+        // ── Matches grouped by round ──────────────────────────────────────
+        int totalRounds = tournament.getTotalRounds();
+        for (int r = 1; r <= totalRounds; r++) {
+            List<Match> roundMatches = tournament.getMatchesByRound(r);
+            if (roundMatches.isEmpty()) continue;
+
+            Label roundLbl = new Label("Round " + r);
+            roundLbl.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+            roundLbl.setTextFill(Color.web("#FFBA09"));
+            roundLbl.setPadding(new Insets(8, 0, 2, 0));
+            container.getChildren().add(roundLbl);
+
+            for (Match m : roundMatches) {
+                container.getChildren().add(createMatchResultRow(m));
+            }
+        }
+
+        ScrollPane sp = new ScrollPane(container);
+        sp.setFitToWidth(true);
+        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
+        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+        });
         bracketView.getChildren().add(sp);
+        VBox.setVgrow(sp, Priority.ALWAYS);
+
+        Team champion = tournament.getTournamentWinner();
+        if (champion != null) addChampionDisplay(champion);
     }
 
     private void displaySwissSystem() {
         VBox container = new VBox(15);
         container.setPadding(new Insets(20));
-        container.setStyle("-fx-background-color: #f5f5f5;");
+        container.setStyle("-fx-background-color: #040D43;");
         Label title = new Label("SWISS SYSTEM TOURNAMENT");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Points","Opp Score"}, "#9b59b6");
+        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Points","Opp Score"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
         sorted.sort((a, b) -> Integer.compare(b.getWins(), a.getWins()));
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
-            grid.add(new Label(String.valueOf(i + 1)), 0, i + 1);
-            grid.add(new Label(t.getName()), 1, i + 1);
-            grid.add(new Label(String.valueOf(t.getWins())), 2, i + 1);
-            grid.add(new Label(String.valueOf(t.getLosses())), 3, i + 1);
-            grid.add(new Label(String.valueOf(t.getPointsScored())), 4, i + 1);
-            grid.add(new Label(String.valueOf(t.getPointsAllowed())), 5, i + 1);
+            addStandingsRow(grid, i + 1, new String[]{
+                String.valueOf(i + 1), t.getName(),
+                String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
+                String.valueOf(t.getPointsScored()), String.valueOf(t.getPointsAllowed())
+            });
         }
         container.getChildren().add(grid);
 
         Label pLabel = new Label("CURRENT ROUND PAIRINGS");
         pLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        pLabel.setTextFill(Color.web("#FFBA09"));
+        pLabel.setPadding(new Insets(8, 0, 2, 0));
         container.getChildren().add(pLabel);
         List<Match> pending = tournament.getPendingMatches();
         if (pending.isEmpty()) {
             Label done = new Label("All rounds complete!");
-            done.setTextFill(Color.GRAY);
+            done.setFont(Font.font("Arial", 12));
+            done.setTextFill(Color.web("#7F8EE3"));
             container.getChildren().add(done);
         } else {
             for (Match m : pending) {
-                HBox row = createSimpleMatchRow(m);
-                row.setStyle("-fx-padding: 5; -fx-border-color: #ddd; -fx-border-width: 1;");
-                Button btn = new Button("Report Score");
-                btn.setStyle("-fx-background-color: #3498db; -fx-text-fill: white;");
-                btn.setOnAction(e -> showScoreDialog(m));
-                row.getChildren().add(btn);
-                container.getChildren().add(row);
+                container.getChildren().add(createMatchResultRow(m));
             }
         }
-        ScrollPane sp = new ScrollPane(container); sp.setFitToWidth(true);
+        ScrollPane sp = new ScrollPane(container);
+        sp.setFitToWidth(true);
+        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
+        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+        });
         bracketView.getChildren().add(sp);
+        VBox.setVgrow(sp, Priority.ALWAYS);
+        Team champion = tournament.getTournamentWinner();
+        if (champion != null) addChampionDisplay(champion);
     }
 
     private void displayFreeForAll() {
         VBox container = new VBox(15);
         container.setPadding(new Insets(20));
-        container.setStyle("-fx-background-color: #f5f5f5;");
+        container.setStyle("-fx-background-color: #040D43;");
         Label title = new Label("FREE FOR ALL - Leaderboard");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Pts Scored","Pts Allowed"}, "#2c3e50");
+        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Pts Scored","Pts Allowed"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
         sorted.sort((a, b) -> Integer.compare(b.getWins(), a.getWins()));
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
-            grid.add(new Label(String.valueOf(i + 1)), 0, i + 1);
-            grid.add(new Label(t.getName()), 1, i + 1);
-            grid.add(new Label(String.valueOf(t.getWins())), 2, i + 1);
-            grid.add(new Label(String.valueOf(t.getLosses())), 3, i + 1);
-            grid.add(new Label(String.valueOf(t.getPointsScored())), 4, i + 1);
-            grid.add(new Label(String.valueOf(t.getPointsAllowed())), 5, i + 1);
+            addStandingsRow(grid, i + 1, new String[]{
+                String.valueOf(i + 1), t.getName(),
+                String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
+                String.valueOf(t.getPointsScored()), String.valueOf(t.getPointsAllowed())
+            });
         }
         container.getChildren().add(grid);
-        ScrollPane sp = new ScrollPane(container); sp.setFitToWidth(true);
+
+        Label matchesLbl = new Label("ALL MATCHES");
+        matchesLbl.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        matchesLbl.setTextFill(Color.web("#FFBA09"));
+        matchesLbl.setPadding(new Insets(8, 0, 2, 0));
+        container.getChildren().add(matchesLbl);
+        for (Match m : tournament.getAllMatches()) {
+            container.getChildren().add(createMatchResultRow(m));
+        }
+
+        ScrollPane sp = new ScrollPane(container);
+        sp.setFitToWidth(true);
+        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
+        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
+        });
         bracketView.getChildren().add(sp);
+        VBox.setVgrow(sp, Priority.ALWAYS);
+        Team champion = tournament.getTournamentWinner();
+        if (champion != null) addChampionDisplay(champion);
     }
 
     private GridPane makeStandingsGrid(String[] headers, String headerColor) {
         GridPane grid = new GridPane();
-        grid.setHgap(10); grid.setVgap(5);
+        grid.setHgap(10); grid.setVgap(4);
         grid.setPadding(new Insets(10));
-        grid.setStyle("-fx-background-color: white; -fx-border-color: #ddd;");
+        grid.setStyle("-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 1; -fx-border-radius: 4; -fx-background-radius: 4;");
         for (int i = 0; i < headers.length; i++) {
             Label h = new Label(headers[i]);
             h.setFont(Font.font("Arial", FontWeight.BOLD, 11));
-            h.setStyle("-fx-background-color:" + headerColor + ";-fx-text-fill:white;-fx-padding:5;");
+            h.setStyle("-fx-background-color:" + headerColor + ";-fx-text-fill:#FFD862;-fx-padding:5 8;-fx-background-radius:3;");
             grid.add(h, i, 0);
         }
         return grid;
+    }
+
+    private void addStandingsRow(GridPane grid, int rowIndex, String[] values) {
+        String rowBg = (rowIndex % 2 == 0) ? "#0d1a40" : "#152055";
+        for (int i = 0; i < values.length; i++) {
+            Label cell = new Label(values[i]);
+            cell.setFont(Font.font("Arial", i == 1 ? FontWeight.BOLD : FontWeight.NORMAL, 11));
+            cell.setTextFill(Color.web(i == 0 ? "#FFBA09" : "#E0E6ED"));
+            cell.setStyle("-fx-background-color:" + rowBg + ";-fx-padding:4 8;");
+            cell.setPrefWidth(i == 1 ? 130 : 60);
+            grid.add(cell, i, rowIndex);
+        }
     }
 
     // =========================================================================
@@ -2002,24 +2075,35 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     private HBox createMatchResultRow(Match match) {
         HBox row = new HBox(15);
         row.setAlignment(Pos.CENTER_LEFT);
-        row.setStyle("-fx-padding: 5; -fx-border-color: #eee; -fx-border-width: 1;");
+        row.setPadding(new Insets(6, 10, 6, 10));
+        row.setStyle("-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 0 0 1 0;");
         String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
         String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
         Label matchLabel = new Label(t1 + " vs " + t2);
+        matchLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        matchLabel.setTextFill(Color.web("#E0E6ED"));
         matchLabel.setPrefWidth(200);
         Label resultLabel = new Label();
+        resultLabel.setFont(Font.font("Arial", 12));
         if (match.isCompleted() && match.getWinner() != null) {
             resultLabel.setText("WINNER: " + match.getWinner().getName() + " (" + match.getScore() + ")");
-            resultLabel.setTextFill(Color.GREEN);
+            resultLabel.setTextFill(Color.web("#FFBA09"));
         } else {
             resultLabel.setText("PENDING");
-            resultLabel.setTextFill(Color.RED);
+            resultLabel.setTextFill(Color.web("#e74c3c"));
         }
+        String btnNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;";
+        String btnDone   = "-fx-background-color: #2a4080; -fx-text-fill: #7F8EE3; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;";
         Button reportBtn = new Button(match.isCompleted() ? "Done" : "Report");
-        reportBtn.setStyle("-fx-background-color: #3498db; -fx-text-fill: white;");
+        reportBtn.setStyle(match.isCompleted() ? btnDone : btnNormal);
         reportBtn.setDisable(match.isCompleted());
+        if (!match.isCompleted()) {
+            reportBtn.setOnMouseEntered(e -> reportBtn.setStyle("-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;"));
+            reportBtn.setOnMouseExited(e  -> reportBtn.setStyle(btnNormal));
+        }
         reportBtn.setOnAction(e -> showScoreDialog(match));
-        row.getChildren().addAll(matchLabel, resultLabel, reportBtn);
+        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+        row.getChildren().addAll(matchLabel, spacer, resultLabel, reportBtn);
         return row;
     }
 
