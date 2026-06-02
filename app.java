@@ -16,8 +16,8 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +35,9 @@ public class app extends Application {
     private ProgressBar progressBar;
     private Label progressLabel;
 
+    // Drag-and-drop state for participant reordering
+    private int dragSourceIndex = -1;
+
     @Override
     public void start(Stage primaryStage) {
         primaryStage.setTitle("Intramural Sports Bracket Generator");
@@ -47,33 +50,30 @@ public class app extends Application {
         VBox rightPanel  = createInformationPanel();
         HBox bottomPanel = createBottomProgressPanel();
 
-        HBox contentArea = new HBox(10, leftPanel, centerPanel, rightPanel);
-        contentArea.setPadding(new Insets(10));
+        HBox contentArea = new HBox(15, leftPanel, centerPanel, rightPanel);
+        contentArea.setPadding(new Insets(15));
         contentArea.setFillHeight(true);
         HBox.setHgrow(centerPanel, Priority.ALWAYS);
 
-        leftPanel.setPrefWidth(250);
+        leftPanel.setPrefWidth(260);
         centerPanel.setPrefWidth(500);
-        rightPanel.setPrefWidth(280);
+        rightPanel.setPrefWidth(260);
+        leftPanel.setMaxWidth(260);
+        rightPanel.setMaxWidth(260);
 
         BorderPane mainLayout = new BorderPane();
         mainLayout.setCenter(contentArea);
         mainLayout.setBottom(bottomPanel);
         mainLayout.setTop(createHeaderBar());
         mainLayout.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
-        mainLayout.setStyle("-fx-background-color: linear-gradient(to right, #040D43, #7F8EE3);");
+        mainLayout.setStyle("-fx-background-color: linear-gradient(to right, #040D43 0%, #040D43 50%, #FFBA09 100%);");
 
         Scene scene = new Scene(mainLayout, 1200, 800);
         scene.setFill(Color.web("#040D43"));
         primaryStage.setScene(scene);
         primaryStage.show();
 
-        bracketView.getChildren().clear();
-        Label emptyLabel = new Label("No teams added yet.\nClick 'ADD' to add participants.");
-        emptyLabel.setFont(Font.font("Arial", 14));
-        emptyLabel.setTextFill(Color.web("#E0E6ED"));
-        emptyLabel.setAlignment(Pos.CENTER);
-        bracketView.getChildren().add(emptyLabel);
+        updateBracketView();
 
         updateProgress();
     }
@@ -85,7 +85,7 @@ public class app extends Application {
     private HBox createHeaderBar() {
         HBox header = new HBox();
         header.setPadding(new Insets(15));
-        header.setStyle("-fx-background-color: linear-gradient(to right, #040D43, #7F8EE3);");
+        header.setStyle("-fx-background-color: linear-gradient(to right, #040D43 0%, #040D43 50%, #FFBA09 100%); -fx-border-width: 1 0 0 0;");
 
         Label title = new Label("🏆 INTRAMURAL BRACKET MAKER");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 20));
@@ -111,11 +111,78 @@ public class app extends Application {
             participantsList.getChildren().add(emptyLabel);
             return;
         }
-        for (Team team : teams) {
+        for (int idx = 0; idx < teams.length; idx++) {
+            final int i = idx;
+            Team team = teams[i];
+
+            Label handle = new Label("\u283f");
+            handle.setStyle("-fx-text-fill: #7F8EE3; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: open-hand;");
+            Tooltip handleTip = new Tooltip("Drag to reorder");
+            Tooltip.install(handle, handleTip);
+
             CheckBox cb = new CheckBox(team.getName());
             cb.setUserData(team);
-            cb.setStyle("-fx-font-size: 12px; -fx-padding: 5;");
-            participantsList.getChildren().add(cb);
+            cb.setStyle("-fx-font-size: 12px;");
+            HBox.setHgrow(cb, Priority.ALWAYS);
+
+            HBox row = new HBox(2, handle, cb);
+            row.setAlignment(Pos.CENTER_LEFT);
+            row.setPadding(new Insets(3, 4, 3, 4));
+            row.setStyle("-fx-background-color: transparent; -fx-background-radius: 4;");
+
+            String normalRowStyle = "-fx-background-color: transparent; -fx-background-radius: 4;";
+            String activeRowStyle = "-fx-background-color: #1e3060; -fx-background-radius: 4;";
+            String hoverRowStyle  = "-fx-background-color: #2a4080; -fx-background-radius: 4; -fx-border-color: #7F8EE3; -fx-border-width: 0 0 2 0;";
+            String handleNormal   = "-fx-text-fill: #7F8EE3; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: open-hand;";
+            String handleActive   = "-fx-text-fill: #FFD862; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: closed-hand;";
+
+            handle.setOnMousePressed(e -> {
+            dragSourceIndex = i;
+            handle.setStyle(handleActive);
+            row.setStyle(activeRowStyle);
+            e.consume();
+        });
+        handle.setOnMouseReleased(e -> {
+            // Reset visuals only — do NOT touch dragSourceIndex here
+            handle.setStyle(handleNormal);
+            row.setStyle(normalRowStyle);
+        });
+        handle.setOnDragDetected(e -> {
+            if (dragSourceIndex >= 0) {
+                handle.startFullDrag();
+            }
+            e.consume();
+        });
+            row.setOnMouseDragOver(e -> {
+                if (dragSourceIndex >= 0 && dragSourceIndex != i)
+                    row.setStyle(hoverRowStyle);
+                e.consume();
+            });
+            row.setOnMouseDragExited(e -> {
+                if (dragSourceIndex != i) row.setStyle(normalRowStyle);
+            });
+            row.setOnMouseDragReleased(e -> {
+                if (dragSourceIndex >= 0 && dragSourceIndex != i) {
+                    int src = dragSourceIndex;
+                    dragSourceIndex = -1;
+                    // Insert src before i (shift elements between)
+                    String srcName = teams[src].getName();
+                    List<String> names = new ArrayList<>();
+                    for (Team t : teams) names.add(t.getName());
+                    names.remove(src);
+                    names.add(i < src ? i : i - 1 + 1, srcName);
+                    // Rebuild teams array with new order
+                    teams = new Team[names.size()];
+                    for (int k = 0; k < names.size(); k++) teams[k] = new Team(k, names.get(k));
+                    rebuildTournament();
+                    updateParticipantsList();
+                    updateBracketView();
+                    updateProgress();
+                }
+                e.consume();
+            });
+
+            participantsList.getChildren().add(row);
         }
     }
 
@@ -133,20 +200,33 @@ public class app extends Application {
         updateParticipantsList();
 
         ScrollPane scrollPane = new ScrollPane(participantsList);
+        scrollPane.setPannable(false);
         scrollPane.setFitToWidth(true);
         scrollPane.setPrefHeight(400);
-        scrollPane.setStyle("-fx-background: #152055; -fx-border-color: #7F8EE3;");
+        scrollPane.setStyle("-fx-background: #152055; -fx-border-color: #7F8EE3; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;");
+        scrollPane.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        scrollPane.lookupAll(".scroll-bar").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        scrollPane.lookupAll(".thumb").forEach(node ->
+            node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+        scrollPane.lookupAll(".track").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        scrollPane.lookupAll(".increment-button, .decrement-button").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        scrollPane.lookupAll(".increment-arrow, .decrement-arrow").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+});
 
         Button addTeamBtn    = createStyledButton("ADD",     "#7F8EE3");
         Button removeTeamBtn = createStyledButton("REMOVE",  "#e74c3c");
-        Button shuffleBtn    = createStyledButton("SHUFFLE", "#27ae60");
+        Button shuffleBtn    = createStyledButton("SHUFFLE", "#7F8EE3");
 
         String addNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String addHover  = "-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String remNormal = "-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String remHover  = "-fx-background-color: #c0392b; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
-        String shuNormal = "-fx-background-color: #27ae60; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
-        String shuHover  = "-fx-background-color: #1e8449; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
+        String shuNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
+        String shuHover  = "-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
 
         addTeamBtn.setStyle(addNormal);
         removeTeamBtn.setStyle(remNormal);
@@ -161,14 +241,15 @@ public class app extends Application {
         removeTeamBtn.setOnAction(e -> removeSelectedTeams());
         shuffleBtn.setOnAction(e    -> shuffleTeams());
 
+        addTeamBtn.setPrefWidth(100);
+        removeTeamBtn.setPrefWidth(100);
+        shuffleBtn.setPrefWidth(200);
         HBox buttonBox = new HBox(10, addTeamBtn, removeTeamBtn);
         buttonBox.setAlignment(Pos.CENTER);
         HBox shuffleBox = new HBox(shuffleBtn);
         shuffleBox.setAlignment(Pos.CENTER);
-        shuffleBtn.setMaxWidth(Double.MAX_VALUE);
-        HBox.setHgrow(shuffleBtn, Priority.ALWAYS);
-
-        Label tip = new Label("Quick Tip: Add participants by checking the box above");
+        
+        Label tip = new Label("Quick Tip: You can mass remove participants by checking the box above");
         tip.setFont(Font.font("Arial", 10));
         tip.setTextFill(Color.web("#E0E6ED"));
         tip.setWrapText(true);
@@ -186,9 +267,9 @@ public class app extends Application {
         title.setFont(Font.font("Arial", FontWeight.BOLD, 14));
         title.setTextFill(Color.web("#FFD862"));
 
-        bracketView = new VBox(10);
-        bracketView.setPadding(new Insets(10));
-        bracketView.setStyle("-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5;");
+        bracketView = new VBox(0);
+        bracketView.setPadding(new Insets(0));
+        bracketView.setStyle("-fx-background-color: #040D43; -fx-border-color: #7F8EE3; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5;");
 
         panel.getChildren().addAll(title, bracketView);
         VBox.setVgrow(bracketView, Priority.ALWAYS);
@@ -216,7 +297,7 @@ public class app extends Application {
             case "Single Elimination":
                 return n == 4 || n == 8 || n == 10 || n == 16 || n == 20 || n == 32;
             case "Double Elimination":
-                return (isPowerOfTwo(n) || n == 6 || n == 10 || n == 12 || n == 20 || n == 24) && n >= 4 && n <= 32;
+                return isPowerOfTwo(n) && n >= 4 && n <= 32;
             // ── FIX: Round Robin, Swiss, Free For All only require 3+ teams ──
             default:
                 return n >= 3;
@@ -261,11 +342,15 @@ public class app extends Application {
         List<Team> teamsToRemove = new ArrayList<>();
 
         for (javafx.scene.Node node : participantsList.getChildren()) {
-            if (node instanceof CheckBox) {
-                CheckBox cb = (CheckBox) node;
-                if (cb.isSelected() && cb.getUserData() instanceof Team)
-                    teamsToRemove.add((Team) cb.getUserData());
+            CheckBox cb = null;
+            if (node instanceof HBox) {
+                for (javafx.scene.Node child : ((HBox) node).getChildren())
+                    if (child instanceof CheckBox) { cb = (CheckBox) child; break; }
+            } else if (node instanceof CheckBox) {
+                cb = (CheckBox) node;
             }
+            if (cb != null && cb.isSelected() && cb.getUserData() instanceof Team)
+                teamsToRemove.add((Team) cb.getUserData());
         }
 
         if (teamsToRemove.isEmpty()) {
@@ -331,6 +416,21 @@ public class app extends Application {
         bracketNameField = new TextField("");
         bracketNameField.setPromptText("Enter bracket name...");
         bracketNameField.setStyle("-fx-background-color: #152055; -fx-text-fill: #E0E6ED; -fx-border-color: #7F8EE3; -fx-border-radius: 3;");
+        bracketNameField.textProperty().addListener((obs, oldText, newText) -> {
+        String[] lines = newText.split("\n", -1);
+        int maxLines = 1;
+        int maxCharsPerLine = 45;
+        boolean tooManyLines = lines.length > maxLines;
+        boolean lineTooLong = false;
+        for (String line : lines) {
+            if (line.length() > maxCharsPerLine) { lineTooLong = true; break; }
+        }
+        if (tooManyLines || lineTooLong) {
+            bracketNameField.setText(oldText);
+            bracketNameField.positionCaret(oldText.length());
+        }
+    });
+
 
         Label typeLabel = new Label("Bracket Type:");
         typeLabel.setTextFill(Color.web("#FFFFFF"));
@@ -374,17 +474,64 @@ public class app extends Application {
         sportField = new TextField("");
         sportField.setPromptText("e.g. Basketball, Valorant...");
         sportField.setStyle("-fx-background-color: #152055; -fx-text-fill: #E0E6ED; -fx-border-color: #7F8EE3; -fx-border-radius: 3;");
+        sportField.textProperty().addListener((obs, oldText, newText) -> {
+        String[] lines = newText.split("\n", -1);
+        int maxLines = 1;
+        int maxCharsPerLine = 45;
+        boolean tooManyLines = lines.length > maxLines;
+        boolean lineTooLong = false;
+        for (String line : lines) {
+            if (line.length() > maxCharsPerLine) { lineTooLong = true; break; }
+        }
+        if (tooManyLines || lineTooLong) {
+            sportField.setText(oldText);
+            sportField.positionCaret(oldText.length());
+        }
+    });
 
-        Label descLabel = new Label("Bracket Description:");
+       Label descLabel = new Label("Bracket Description:");
         descLabel.setTextFill(Color.web("#FFFFFF"));
         descLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px;");
         descriptionArea = new TextArea();
         descriptionArea.setPromptText("Enter tournament description...");
         descriptionArea.setPrefHeight(80);
+        descriptionArea.setWrapText(true);
         descriptionArea.setStyle(
             "-fx-control-inner-background: #152055; -fx-background-color: transparent;" +
             "-fx-border-color: #7F8EE3; -fx-border-radius: 3;" +
             "-fx-prompt-text-fill: #e0e6edc2; -fx-text-fill: #FFFFFF;");
+        descriptionArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+            ScrollPane sp = (ScrollPane) descriptionArea.lookup(".scroll-pane");
+            if (sp != null) {
+                sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+                sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+            }
+        });
+        descriptionArea.textProperty().addListener((obs, oldText, newText) -> {
+        String[] lines = newText.split("\n", -1);
+        int maxLines = 4;
+        int maxCharsPerLine = 28;
+        boolean tooManyLines = lines.length > maxLines;
+        boolean lineTooLong = false;
+        for (String line : lines) {
+            if (line.length() > maxCharsPerLine) { lineTooLong = true; break; }
+        }
+        if (tooManyLines || lineTooLong) {
+            descriptionArea.setText(oldText);
+            descriptionArea.positionCaret(oldText.length());
+        }
+    });
+        descriptionArea.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
+                int caret = descriptionArea.getCaretPosition();
+                String current = descriptionArea.getText();
+                if (current.length() < 220) {
+                    descriptionArea.setText(current.substring(0, caret) + "\n" + current.substring(caret));
+                    descriptionArea.positionCaret(caret + 1);
+                }
+                e.consume();
+            }
+        });
 
         Label statusTitle = new Label("BRACKET STATUS:");
         statusTitle.setStyle("-fx-font-weight: bold; -fx-font-size: 16px; -fx-text-fill: #FFD862;");
@@ -419,7 +566,7 @@ public class app extends Application {
 
         Label tip = new Label("To save your bracket, click the 'Save Bracket' button.");
         tip.setFont(Font.font("Arial", 10));
-        tip.setTextFill(Color.web("#7f8c8d"));
+        tip.setTextFill(Color.web("#E0E6ED"));
         tip.setWrapText(true);
 
         panel.getChildren().addAll(
@@ -440,7 +587,7 @@ public class app extends Application {
     private HBox createBottomProgressPanel() {
         HBox panel = new HBox(10);
         panel.setPadding(new Insets(10, 15, 10, 15));
-        panel.setStyle("-fx-background-color: linear-gradient(to right, #040D43, #7F8EE3); -fx-border-width: 1 0 0 0;");
+        panel.setStyle("-fx-background-color: linear-gradient(to right, #040D43 0%, #040D43 50%, #FFBA09 100%); -fx-border-width: 1 0 0 0;");
         panel.setAlignment(Pos.CENTER_LEFT);
 
         Label progressTitle = new Label("Progress:");
@@ -466,9 +613,9 @@ public class app extends Application {
     // =========================================================================
 
     private String getNotReadyMessage(int n, String type) {
-        if (n == 0) return "Click 'ADD' to add participants.\n(Valid counts depend on bracket type)";
+        if (n == 0) return "Single Elimination (4, 8, 10, 16, 20, 32) \nDouble Elimination (4, 8, 16, 32) \nRound Robin, Swiss System, and Free For All require at least 3 teams.";
         if ("Single Elimination".equals(type)) {
-            if (n < 4) return "Need at least 4 teams for Single Elimination.";
+            if (n < 4) return "Need at least 4 Participants for Single Elimination.";
             int[] valid = {4, 8, 10, 16, 20, 32};
             for (int v : valid) {
                 if (n == v) return "";
@@ -478,10 +625,10 @@ public class app extends Application {
         }
         if ("Double Elimination".equals(type)) {
             if (n < 4)  return "Need at least 4 teams for Double Elimination.";
-            if (isPowerOfTwo(n) || n == 6 || n == 10 || n == 12 || n == 20 || n == 24) return "";
-            int[] valid = {4, 6, 8, 10, 12, 16, 20, 24, 32};
-            for (int v : valid) if (v > n) return "Add " + (v - n) + " more team(s) for " + v + "-team Double Elimination.\n(Valid: 4, 6, 8, 10, 12, 16, 20, 24, 32)";
-            return "Double Elimination supports 4, 6, 8, 10, 12, 16, 20, 24, or 32 teams.\nCurrent: " + n;
+            if (isPowerOfTwo(n)) return "";
+            int[] valid = {4, 8, 16, 32};
+            for (int v : valid) if (v > n) return "Add " + (v - n) + " more team(s) for " + v + "-team Double Elimination.\n(Valid: 4, 8, 16, 32)";
+            return "Double Elimination supports 4, 8, 16, or 32 teams.\nCurrent: " + n;
         }
         // Round Robin, Swiss, Free For All: only 3+ required
         if (n < 3) return "Need at least 3 teams for " + type + ".";
@@ -492,31 +639,29 @@ public class app extends Application {
         bracketView.getChildren().clear();
         String currentType = bracketTypeCombo.getValue();
 
-        if ("Double Elimination".equals(currentType)) {
-            boolean valid = isPowerOfTwo(teams.length)
-                    || teams.length == 6  || teams.length == 10
-                    || teams.length == 12 || teams.length == 20
-                    || teams.length == 24;
-            if (teams.length >= 4 && !valid) {
-                Label msg = new Label(getNotReadyMessage(teams.length, currentType));
-                msg.setFont(Font.font("Arial", 13));
-                msg.setTextFill(Color.web("#FF6B6B"));
-                msg.setAlignment(Pos.CENTER);
-                msg.setWrapText(true);
-                bracketView.getChildren().add(msg);
-                return;
-            }
-        }
-
         if (tournament == null || !isValidTeamCount(teams.length, currentType)) {
-            Label msg = new Label(getNotReadyMessage(teams.length, currentType));
-            msg.setFont(Font.font("Arial", 13));
-            msg.setTextFill(Color.web("#FFD862"));
-            msg.setAlignment(Pos.CENTER);
-            msg.setWrapText(true);
-            bracketView.getChildren().add(msg);
-            return;
-        }
+    String fullMsg = getNotReadyMessage(teams.length, currentType);
+    if (teams.length == 0 || fullMsg.startsWith("Supported")) {
+        Label title = new Label("SUPPORTED FORMATS:");
+        title.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+        title.setTextFill(Color.web("#FFD862"));
+        title.setPadding(new Insets(10, 10, 0, 10));
+        Label msg = new Label(fullMsg.replace("Supported Formats:\n \n", ""));
+        msg.setFont(Font.font("Arial", 13));
+        msg.setTextFill(Color.web("#E0E6ED"));
+        msg.setWrapText(true);
+        msg.setPadding(new Insets(5, 10, 10, 10));
+        bracketView.getChildren().addAll(title, msg);
+    } else {
+        Label msg = new Label(fullMsg);
+        msg.setFont(Font.font("Arial", 13));
+        msg.setTextFill(Color.web("#E0E6ED"));
+        msg.setWrapText(true);
+        msg.setPadding(new Insets(10));
+        bracketView.getChildren().add(msg);
+    }
+    return;
+}
 
         switch (currentType) {
             case "Single Elimination":
@@ -614,11 +759,11 @@ public class app extends Application {
 
         Pane pane = new Pane();
         pane.setPrefSize(canvasW, canvasH);
-        pane.setStyle("-fx-background-color: #f8f8f8;");
+        pane.setStyle("-fx-background-color: #040D43;");
 
         Canvas canvas = new Canvas(canvasW, canvasH);
         GraphicsContext gc = canvas.getGraphicsContext2D();
-        gc.setStroke(Color.web("#27ae60"));
+        gc.setStroke(Color.web("#FFBA09"));
         gc.setLineWidth(2);
 
         for (int ri = 1; ri < visRoundKeys.size(); ri++) {
@@ -640,7 +785,7 @@ public class app extends Application {
 
         for (int ri = 0; ri < visRoundKeys.size(); ri++) {
             int fromEnd = visRounds - 1 - ri;
-            String rName = fromEnd == 0 ? "Final"
+            String rName = fromEnd == 0 ? "Finals"
                          : fromEnd == 1 ? "Semifinals"
                          : fromEnd == 2 ? "Quarterfinals"
                          : "Round " + (ri + 1);
@@ -648,7 +793,7 @@ public class app extends Application {
             if (rMs == null) continue;
             double topY = rMs.stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
             if (topY == Double.MAX_VALUE) continue;
-            Label lbl = styledLabel(rName, "#2c3e50", FontWeight.BOLD, 11);
+            Label lbl = styledLabel(rName, "#FFD862", FontWeight.BOLD, 11);
             lbl.setLayoutX(colX[ri]); lbl.setLayoutY(topY - 18);
             pane.getChildren().add(lbl);
         }
@@ -675,6 +820,10 @@ public class app extends Application {
     // DOUBLE ELIMINATION (standard: 4, 8, 16, 32)
     // =========================================================================
 
+    // =========================================================================
+    // DOUBLE ELIMINATION (standard: 4, 8, 16, 32)
+    // =========================================================================
+
     private void displayDoubleElimination() {
         final double CARD_W      = 180;
         final double CARD_H      = 68;
@@ -684,26 +833,32 @@ public class app extends Application {
         final double W_TOP_PAD   = 80;
         final double SECTION_GAP = 100;
 
-        int winnersRounds = tournament.getWinnersRounds();
+        int n         = teams.length;
+        int numRounds = (int)(Math.log(n) / Math.log(2));   // WB rounds: 3 for 8t, 4 for 16t
+        int winnersRounds = numRounds;
+
+        // ── Collect WB matches by round (simple: filter allMatches) ──────────
         Map<Integer, List<Match>> winnersByRound = new HashMap<>();
         for (int r = 1; r <= winnersRounds; r++) {
             List<Match> ms = tournament.getWinnersMatchesByRound(r);
             if (!ms.isEmpty()) winnersByRound.put(r, ms);
         }
 
+        // ── Collect LB matches by round ──────────────────────────────────────
         List<Match> losersAll = tournament.getLosersBracketMatches();
-        Map<Integer, List<Match>> losersByRound = new HashMap<>();
-        for (Match m : losersAll)
+        Map<Integer, List<Match>> losersByRound = new LinkedHashMap<>();
+        for (Match m : losersAll) {
             losersByRound.computeIfAbsent(m.getRound(), k -> new ArrayList<>()).add(m);
-
-        Match grandFinal = tournament.getGrandFinals();
-
+        }
         List<Integer> lRounds = new ArrayList<>(losersByRound.keySet());
-        java.util.Collections.sort(lRounds);
+        Collections.sort(lRounds);
+        // re-index LB rounds to columns 0,1,2,...
         Map<Integer, Integer> lRoundToCol = new HashMap<>();
         for (int i = 0; i < lRounds.size(); i++) lRoundToCol.put(lRounds.get(i), i);
 
-        int wCols = winnersByRound.isEmpty() ? 0 : winnersRounds;
+        Match grandFinal = tournament.getGrandFinals();
+
+        int wCols = winnersRounds;
         int lCols = lRounds.size();
         double colStride = CARD_W + COL_GAP;
 
@@ -712,173 +867,233 @@ public class app extends Application {
         double[] lColX = new double[Math.max(lCols, 1)];
         for (int c = 0; c < lCols; c++) lColX[c] = 20 + c * colStride;
 
-        double gfX = 20;
-        if (wCols > 0) gfX = Math.max(gfX, wColX[wCols - 1] + CARD_W + COL_GAP);
-        if (lCols > 0) gfX = Math.max(gfX, lColX[lCols - 1] + CARD_W + COL_GAP);
-
+        // ── POSITIONAL Y layout (no child-link traversal) ────────────────────
+        // WB: assign Y by slot index, doubling the gap each round
         Map<Match, Double> matchY = new HashMap<>();
 
-        if (!winnersByRound.isEmpty()) {
+        // WB round 1: evenly spaced
+        if (winnersByRound.containsKey(1)) {
             List<Match> r1 = winnersByRound.get(1);
-            if (r1 != null) {
-                double slotH = CARD_H + MATCH_V_GAP;
-                for (int i = 0; i < r1.size(); i++) matchY.put(r1.get(i), W_TOP_PAD + i * slotH);
-            }
-            for (int r = 2; r <= winnersRounds; r++) {
-                List<Match> curr = winnersByRound.get(r);
-                if (curr == null) continue;
-                for (Match m : curr) {
-                    Double ly = m.getLeftChild()  != null ? matchY.get(m.getLeftChild())  : null;
-                    Double ry = m.getRightChild() != null ? matchY.get(m.getRightChild()) : null;
-                    if      (ly != null && ry != null) matchY.put(m, (ly + ry) / 2.0);
-                    else if (ly != null)               matchY.put(m, ly);
-                    else if (ry != null)               matchY.put(m, ry);
-                    else {
-                        List<Match> prev = winnersByRound.get(r - 1);
-                        if (prev != null) {
-                            int idx = curr.indexOf(m), i1 = idx * 2, i2 = idx * 2 + 1;
-                            if (i2 < prev.size())
-                                matchY.put(m, (matchY.getOrDefault(prev.get(i1), W_TOP_PAD) + matchY.getOrDefault(prev.get(i2), W_TOP_PAD)) / 2.0);
-                            else if (i1 < prev.size())
-                                matchY.put(m, matchY.getOrDefault(prev.get(i1), W_TOP_PAD));
-                        }
-                    }
-                }
+            double slotH = CARD_H + MATCH_V_GAP;
+            for (int i = 0; i < r1.size(); i++) {
+                matchY.put(r1.get(i), W_TOP_PAD + i * slotH);
             }
         }
 
-        double winnersHeight = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        double lOffsetY = winnersHeight + CARD_H + SECTION_GAP;
+        // WB rounds 2+: midpoint of the two children from the previous round
+        for (int r = 2; r <= winnersRounds; r++) {
+            List<Match> prev = winnersByRound.get(r - 1);
+            List<Match> curr = winnersByRound.get(r);
+            if (prev == null || curr == null) continue;
+            for (int i = 0; i < curr.size(); i++) {
+                int c1 = i * 2, c2 = i * 2 + 1;
+                double y1 = c1 < prev.size() && matchY.containsKey(prev.get(c1))
+                            ? matchY.get(prev.get(c1)) : W_TOP_PAD;
+                double y2 = c2 < prev.size() && matchY.containsKey(prev.get(c2))
+                            ? matchY.get(prev.get(c2)) : y1;
+                matchY.put(curr.get(i), (y1 + y2) / 2.0);
+            }
+        }
 
+        double winnersMaxY = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(W_TOP_PAD);
+        double lbOffsetY   = winnersMaxY + CARD_H + SECTION_GAP;
+
+        // LB: assign Y by slot index per column, scaling the gap to match WB spread
         if (!lRounds.isEmpty()) {
-            List<Match> lr1 = losersByRound.get(lRounds.get(0));
-            if (lr1 != null) {
-                double slotH = CARD_H + MATCH_V_GAP;
-                for (int i = 0; i < lr1.size(); i++) matchY.put(lr1.get(i), lOffsetY + 60 + i * slotH);
+            // LB col 0 has the most matches; scale slot height to fill same vertical spread as WB
+            List<Match> lbC0 = losersByRound.get(lRounds.get(0));
+            double lbSlotH = CARD_H + MATCH_V_GAP;
+            if (lbC0 != null) {
+                for (int i = 0; i < lbC0.size(); i++) {
+                    matchY.put(lbC0.get(i), lbOffsetY + 60 + i * lbSlotH);
+                }
             }
-            for (int ri = 1; ri < lRounds.size(); ri++) {
-                List<Match> curr = losersByRound.get(lRounds.get(ri));
-                if (curr == null) continue;
-                for (Match m : curr) {
-                    Double ly = m.getLeftChild()  != null ? matchY.get(m.getLeftChild())  : null;
-                    Double ry = m.getRightChild() != null ? matchY.get(m.getRightChild()) : null;
-                    if      (ly != null && ry != null) matchY.put(m, (ly + ry) / 2.0);
-                    else if (ly != null)               matchY.put(m, ly);
-                    else if (ry != null)               matchY.put(m, ry);
-                    else {
-                        List<Match> prev = losersByRound.get(lRounds.get(ri - 1));
-                        if (prev != null) {
-                            int idx = curr.indexOf(m), i1 = idx * 2, i2 = idx * 2 + 1;
-                            if (curr.size() == prev.size() && idx < prev.size() && matchY.containsKey(prev.get(idx)))
-                                matchY.put(m, matchY.get(prev.get(idx)));
-                            else if (i2 < prev.size()) {
-                                Double y1 = matchY.get(prev.get(i1)), y2 = matchY.get(prev.get(i2));
-                                if (y1 != null && y2 != null) matchY.put(m, (y1 + y2) / 2.0);
-                                else if (y1 != null) matchY.put(m, y1);
-                                else if (y2 != null) matchY.put(m, y2);
-                            } else if (i1 < prev.size() && matchY.containsKey(prev.get(i1)))
-                                matchY.put(m, matchY.get(prev.get(i1)));
-                        }
+            // LB later columns: midpoint of previous column's matches
+            for (int ci = 1; ci < lRounds.size(); ci++) {
+                List<Match> prev = losersByRound.get(lRounds.get(ci - 1));
+                List<Match> curr = losersByRound.get(lRounds.get(ci));
+                if (prev == null || curr == null) continue;
+                int prevSize = prev.size();
+                int currSize = curr.size();
+                if (currSize == prevSize) {
+                    // 1:1 mapping (drop round): same Y as previous
+                    for (int i = 0; i < currSize; i++) {
+                        if (matchY.containsKey(prev.get(i)))
+                            matchY.put(curr.get(i), matchY.get(prev.get(i)));
+                    }
+                } else {
+                    // elim round: pair up previous matches
+                    for (int i = 0; i < currSize; i++) {
+                        int c1 = i * 2, c2 = i * 2 + 1;
+                        double y1 = c1 < prevSize && matchY.containsKey(prev.get(c1))
+                                    ? matchY.get(prev.get(c1)) : lbOffsetY + 60;
+                        double y2 = c2 < prevSize && matchY.containsKey(prev.get(c2))
+                                    ? matchY.get(prev.get(c2)) : y1;
+                        matchY.put(curr.get(i), (y1 + y2) / 2.0);
                     }
                 }
             }
         }
 
-        double lowestY = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(0);
+        // Grand Final: vertically centered between WB and LB
+        double wbTopY  = W_TOP_PAD;
+        double lbBotY  = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(lbOffsetY) + CARD_H;
+        double gfCenterY = (wbTopY + lbBotY) / 2.0;
 
-        double wbTopY = W_TOP_PAD;
-        double lbBotY = lowestY + CARD_H;
-        double gfY    = (wbTopY + lbBotY) / 2.0 - CARD_MID;
-
-        double maxY = lbBotY + SECTION_GAP / 2.0 + 60;
         double lastWbRightEdge = (wCols > 0) ? wColX[wCols - 1] + CARD_W : 0;
         double lastLbRightEdge = (lCols > 0) ? lColX[lCols - 1] + CARD_W : 0;
-        gfX = Math.max(lastWbRightEdge, lastLbRightEdge) + COL_GAP;
+        double gfX = Math.max(lastWbRightEdge, lastLbRightEdge) + COL_GAP;
+        double gfY = gfCenterY - CARD_MID;
+        if (grandFinal != null) matchY.put(grandFinal, gfY);
+
+        // ── Canvas sizing ────────────────────────────────────────────────────
+        double maxY    = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(400);
         double canvasW = gfX + CARD_W + 60;
+        double canvasH = maxY + CARD_H + 80;
 
         Pane pane = new Pane();
-        pane.setPrefSize(canvasW, maxY);
-        pane.setStyle("-fx-background-color: #f8f8f8;");
+        pane.setPrefSize(canvasW, canvasH);
+        pane.setStyle("-fx-background-color: #040D43;");
 
-        Canvas canvas = new Canvas(canvasW, maxY);
+        Canvas canvas = new Canvas(canvasW, canvasH);
         GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.setStroke(Color.web("#FFBA09"));
         gc.setLineWidth(2);
 
-        gc.setStroke(Color.web("#27ae60"));
+        // ── WB connector lines ───────────────────────────────────────────────
         for (int r = 2; r <= winnersRounds; r++) {
+            List<Match> prev = winnersByRound.get(r - 1);
             List<Match> curr = winnersByRound.get(r);
-            if (curr == null) continue;
-            double srcRX = wColX[r - 2] + CARD_W, dstLX = wColX[r - 1], midX = (srcRX + dstLX) / 2.0;
-            for (Match m : curr) {
-                if (!matchY.containsKey(m)) continue;
-                double tgtY = matchY.get(m) + CARD_MID;
-                drawBracketLine(gc, m.getLeftChild(),  matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-                drawBracketLine(gc, m.getRightChild(), matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-            }
-        }
-        gc.setStroke(Color.web("#e74c3c"));
-        for (int ri = 1; ri < lRounds.size(); ri++) {
-            List<Match> currMs = losersByRound.get(lRounds.get(ri - 1));
-            List<Match> nextMs = losersByRound.get(lRounds.get(ri));
-            if (currMs == null || nextMs == null) continue;
-            double srcRX = lColX[lRoundToCol.get(lRounds.get(ri - 1))] + CARD_W;
-            double dstLX = lColX[lRoundToCol.get(lRounds.get(ri))];
+            if (prev == null || curr == null) continue;
+            double srcRX = wColX[r - 2] + CARD_W;
+            double dstLX = wColX[r - 1];
             double midX  = (srcRX + dstLX) / 2.0;
-            for (Match m : nextMs) {
+            for (int i = 0; i < curr.size(); i++) {
+                Match m = curr.get(i);
                 if (!matchY.containsKey(m)) continue;
                 double tgtY = matchY.get(m) + CARD_MID;
-                Match lc = m.getLeftChild(), rc = m.getRightChild();
-                if (lc != null && matchY.containsKey(lc) && currMs.contains(lc))
-                    drawBracketLine(gc, lc, matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-                if (rc != null && matchY.containsKey(rc) && currMs.contains(rc))
-                    drawBracketLine(gc, rc, matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
+                int c1 = i * 2, c2 = i * 2 + 1;
+                if (c1 < prev.size() && matchY.containsKey(prev.get(c1))) {
+                    double y = matchY.get(prev.get(c1)) + CARD_MID;
+                    gc.strokeLine(srcRX, y, midX, y);
+                    gc.strokeLine(midX, y, midX, tgtY);
+                    gc.strokeLine(midX, tgtY, dstLX, tgtY);
+                }
+                if (c2 < prev.size() && matchY.containsKey(prev.get(c2))) {
+                    double y = matchY.get(prev.get(c2)) + CARD_MID;
+                    gc.strokeLine(srcRX, y, midX, y);
+                    gc.strokeLine(midX, y, midX, tgtY);
+                    gc.strokeLine(midX, tgtY, dstLX, tgtY);
+                }
             }
         }
-        gc.setStroke(Color.web("#f39c12")); gc.setLineWidth(2.5);
-        double gfCY = gfY + CARD_MID, mergeX = gfX - COL_GAP / 2.0;
-        if (!winnersByRound.isEmpty()) {
-            List<Match> lastW = winnersByRound.get(winnersRounds);
-            if (lastW == null) for (int r = winnersRounds; r >= 1; r--) if (winnersByRound.containsKey(r)) { lastW = winnersByRound.get(r); break; }
-            if (lastW != null && !lastW.isEmpty() && matchY.containsKey(lastW.get(0))) {
-                double wx = wColX[winnersRounds - 1] + CARD_W, wy = matchY.get(lastW.get(0)) + CARD_MID;
-                gc.strokeLine(wx, wy, mergeX, wy); gc.strokeLine(mergeX, wy, mergeX, gfCY); gc.strokeLine(mergeX, gfCY, gfX, gfCY);
+
+        // ── LB connector lines ───────────────────────────────────────────────
+        for (int ci = 1; ci < lRounds.size(); ci++) {
+            List<Match> prev = losersByRound.get(lRounds.get(ci - 1));
+            List<Match> curr = losersByRound.get(lRounds.get(ci));
+            if (prev == null || curr == null) continue;
+            int prevCol = lRoundToCol.get(lRounds.get(ci - 1));
+            int currCol = lRoundToCol.get(lRounds.get(ci));
+            double srcRX = lColX[prevCol] + CARD_W;
+            double dstLX = lColX[currCol];
+            double midX  = (srcRX + dstLX) / 2.0;
+            int prevSize = prev.size(), currSize = curr.size();
+            for (int i = 0; i < currSize; i++) {
+                Match m = curr.get(i);
+                if (!matchY.containsKey(m)) continue;
+                double tgtY = matchY.get(m) + CARD_MID;
+                if (currSize == prevSize) {
+                    // 1:1 drop round
+                    if (matchY.containsKey(prev.get(i))) {
+                        double y = matchY.get(prev.get(i)) + CARD_MID;
+                        gc.strokeLine(srcRX, y, midX, y);
+                        gc.strokeLine(midX, y, midX, tgtY);
+                        gc.strokeLine(midX, tgtY, dstLX, tgtY);
+                    }
+                } else {
+                    // elim round: two feeders
+                    int c1 = i * 2, c2 = i * 2 + 1;
+                    if (c1 < prevSize && matchY.containsKey(prev.get(c1))) {
+                        double y = matchY.get(prev.get(c1)) + CARD_MID;
+                        gc.strokeLine(srcRX, y, midX, y);
+                        gc.strokeLine(midX, y, midX, tgtY);
+                        gc.strokeLine(midX, tgtY, dstLX, tgtY);
+                    }
+                    if (c2 < prevSize && matchY.containsKey(prev.get(c2))) {
+                        double y = matchY.get(prev.get(c2)) + CARD_MID;
+                        gc.strokeLine(srcRX, y, midX, y);
+                        gc.strokeLine(midX, y, midX, tgtY);
+                        gc.strokeLine(midX, tgtY, dstLX, tgtY);
+                    }
+                }
             }
         }
-        if (!lRounds.isEmpty()) {
-            List<Match> lastL = losersByRound.get(lRounds.get(lRounds.size() - 1));
-            if (lastL != null && !lastL.isEmpty() && matchY.containsKey(lastL.get(0))) {
-                double lx = lColX[lRoundToCol.get(lRounds.get(lRounds.size() - 1))] + CARD_W;
-                double ly = matchY.get(lastL.get(0)) + CARD_MID;
-                gc.strokeLine(lx, ly, mergeX, ly); gc.strokeLine(mergeX, ly, mergeX, gfCY); gc.strokeLine(mergeX, gfCY, gfX, gfCY);
+
+        // ── Grand Final feed lines ───────────────────────────────────────────
+        if (grandFinal != null && matchY.containsKey(grandFinal)) {
+            gc.setStroke(Color.web("#FFBA09")); gc.setLineWidth(2.5);
+            double gfCY  = matchY.get(grandFinal) + CARD_MID;
+            double mergeX = gfX - COL_GAP / 2.0;
+            // WB final → GF
+            if (winnersByRound.containsKey(winnersRounds)) {
+                List<Match> lastW = winnersByRound.get(winnersRounds);
+                if (!lastW.isEmpty() && matchY.containsKey(lastW.get(0))) {
+                    double wy = matchY.get(lastW.get(0)) + CARD_MID;
+                    double wx = wColX[winnersRounds - 1] + CARD_W;
+                    gc.strokeLine(wx, wy, mergeX, wy);
+                    gc.strokeLine(mergeX, wy, mergeX, gfCY);
+                    gc.strokeLine(mergeX, gfCY, gfX, gfCY);
+                }
+            }
+            // LB final → GF
+            if (!lRounds.isEmpty()) {
+                List<Match> lastL = losersByRound.get(lRounds.get(lRounds.size() - 1));
+                if (lastL != null && !lastL.isEmpty() && matchY.containsKey(lastL.get(0))) {
+                    double ly = matchY.get(lastL.get(0)) + CARD_MID;
+                    double lx = lColX[lRoundToCol.get(lRounds.get(lRounds.size() - 1))] + CARD_W;
+                    gc.strokeLine(lx, ly, mergeX, ly);
+                    gc.strokeLine(mergeX, ly, mergeX, gfCY);
+                    gc.strokeLine(mergeX, gfCY, gfX, gfCY);
+                }
             }
         }
+
         pane.getChildren().add(canvas);
 
-        addPaneLabel(pane, "🏆 WINNERS BRACKET", wCols > 0 ? wColX[0] : 20, W_TOP_PAD - 42, "#27ae60", FontWeight.BOLD, 13);
-        addPaneLabel(pane, "💀 LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lOffsetY + 8,   "#e74c3c", FontWeight.BOLD, 13);
+        // ── Section labels ───────────────────────────────────────────────────
+        addPaneLabel(pane, "WINNERS BRACKET", wCols > 0 ? wColX[0] : 20, W_TOP_PAD - 42, "#FFBA09", FontWeight.BOLD, 13);
+        addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbOffsetY + 8,  "#FFBA09", FontWeight.BOLD, 13);
+        if (grandFinal != null)
+            addPaneLabel(pane, "Grand Finals", gfX, gfY - 18, "#FFD862", FontWeight.BOLD, 12);
 
-        for (Map.Entry<Integer, List<Match>> e : winnersByRound.entrySet()) {
-            int r = e.getKey();
-            double topY = e.getValue().stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
-            if (topY == Double.MAX_VALUE) continue;
-            Label rl = styledLabel(getWinnersRoundName(r, winnersRounds), "#2c3e50", FontWeight.BOLD, 11);
-            rl.setLayoutX(wColX[r - 1]); rl.setLayoutY(topY - 18);
+        // ── WB round labels ──────────────────────────────────────────────────
+        for (int r = 1; r <= winnersRounds; r++) {
+            if (!winnersByRound.containsKey(r)) continue;
+            String rName = getWinnersRoundName(r, winnersRounds);
+            Label rl = styledLabel(rName, "#FFD862", FontWeight.BOLD, 11);
+            rl.setLayoutX(wColX[r - 1]);
+            double topY = winnersByRound.get(r).stream().filter(matchY::containsKey)
+                          .mapToDouble(matchY::get).min().orElse(W_TOP_PAD);
+            rl.setLayoutY(topY - 18);
             pane.getChildren().add(rl);
         }
-        for (int r : lRounds) {
-            double topY = losersByRound.get(r).stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
-            if (topY == Double.MAX_VALUE) continue;
-            Label rl = styledLabel("Lower R" + (lRoundToCol.get(r) + 1), "#c0392b", FontWeight.BOLD, 11);
-            rl.setLayoutX(lColX[lRoundToCol.get(r)]); rl.setLayoutY(topY - 18);
+
+        // ── LB round labels ──────────────────────────────────────────────────
+        for (int ci = 0; ci < lRounds.size(); ci++) {
+            int r = lRounds.get(ci);
+            List<Match> rms = losersByRound.get(r);
+            double topY = rms.stream().filter(matchY::containsKey)
+                          .mapToDouble(matchY::get).min().orElse(lbOffsetY + 60);
+            Label rl = styledLabel("Losers Round " + (ci + 1), "#FFD862", FontWeight.BOLD, 11);
+            rl.setLayoutX(lColX[ci]); rl.setLayoutY(topY - 18);
             pane.getChildren().add(rl);
         }
-        Label gfLabel = styledLabel("GRAND FINAL", "#e67e22", FontWeight.BOLD, 11);
-        gfLabel.setLayoutX(gfX); gfLabel.setLayoutY(gfY - 18);
-        pane.getChildren().add(gfLabel);
 
-        for (Map.Entry<Integer, List<Match>> e : winnersByRound.entrySet()) {
-            int r = e.getKey();
-            for (Match m : e.getValue()) {
+        // ── WB match cards ───────────────────────────────────────────────────
+        for (int r = 1; r <= winnersRounds; r++) {
+            if (!winnersByRound.containsKey(r)) continue;
+            for (Match m : winnersByRound.get(r)) {
                 if (!matchY.containsKey(m)) continue;
                 VBox card = createDeMatchCard(m, true, false);
                 card.setLayoutX(wColX[r - 1]); card.setLayoutY(matchY.get(m));
@@ -886,18 +1101,23 @@ public class app extends Application {
                 pane.getChildren().add(card);
             }
         }
-        for (int r : lRounds) {
+
+        // ── LB match cards ───────────────────────────────────────────────────
+        for (int ci = 0; ci < lRounds.size(); ci++) {
+            int r = lRounds.get(ci);
             for (Match m : losersByRound.get(r)) {
                 if (!matchY.containsKey(m)) continue;
                 VBox card = createDeMatchCard(m, false, false);
-                card.setLayoutX(lColX[lRoundToCol.get(r)]); card.setLayoutY(matchY.get(m));
+                card.setLayoutX(lColX[ci]); card.setLayoutY(matchY.get(m));
                 card.setPrefWidth(CARD_W); card.setMaxWidth(CARD_W);
                 pane.getChildren().add(card);
             }
         }
-        if (grandFinal != null) {
+
+        // ── Grand Final card ─────────────────────────────────────────────────
+        if (grandFinal != null && matchY.containsKey(grandFinal)) {
             VBox gfCard = createDeMatchCard(grandFinal, false, true);
-            gfCard.setLayoutX(gfX); gfCard.setLayoutY(gfY);
+            gfCard.setLayoutX(gfX); gfCard.setLayoutY(matchY.get(grandFinal));
             gfCard.setPrefWidth(CARD_W + 20); gfCard.setMaxWidth(CARD_W + 20);
             pane.getChildren().add(gfCard);
         }
@@ -906,7 +1126,6 @@ public class app extends Application {
         Team champion = tournament.getTournamentWinner();
         if (champion != null) addChampionDisplay(champion);
     }
-
     // =========================================================================
     // PLAY-IN DOUBLE ELIMINATION
     // Only renders play-in sections (WB / LB / GF) when they actually have matches.
@@ -944,8 +1163,6 @@ public class app extends Application {
         Match piGF = tournament.getPlayInGrandFinal();
         boolean hasPiGF = piGF != null;
 
-        // Determine whether any play-in content exists at all
-        boolean hasPlayIn = hasPiWb || hasPiLb || hasPiGF;
 
         int totalPiCols = Math.max(hasPiWb ? piWbRounds : 0, hasPiLb ? piLbRounds.size() : 0);
         double colStride = CARD_W + COL_GAP;
@@ -999,48 +1216,14 @@ public class app extends Application {
         double piGfY    = (TOP_PAD + piLbBotY) / 2.0 - CARD_MID;
         if (hasPiGF) matchY.put(piGF, piGfY);
 
-        // ── Main bracket layout ───────────────────────────────────────
-        double mainStartX = hasPlayIn ? piGfX + CARD_W + COL_GAP * 2 : 20;
-        double mainX0 = mainStartX;
-        double mainX1 = mainX0 + CARD_W + COL_GAP;
-        double mainX2 = mainX1 + CARD_W + COL_GAP;
-
-        List<Match> mainMatches = tournament.getMainBracketMatches();
-        List<Match> sfMatches   = new ArrayList<>();
-        List<Match> ffMatches   = new ArrayList<>();
-        Match champMatch        = null;
-
-        for (Match m : mainMatches) {
-            if      (m == tournament.getGrandFinals())                      champMatch = m;
-            else if (m.getLeftChild() == null && m.getRightChild() == null) sfMatches.add(m);
-            else                                                            ffMatches.add(m);
-        }
-        sfMatches.sort(Comparator.comparingInt(Match::getMatchId));
-        ffMatches.sort(Comparator.comparingInt(Match::getMatchId));
-
-        double sfSlotH = CARD_H + MATCH_V_GAP * 3;
-        for (int i = 0; i < sfMatches.size(); i++)
-            matchY.put(sfMatches.get(i), TOP_PAD + i * sfSlotH);
-
-        for (Match ff : ffMatches) {
-            Double ly = ff.getLeftChild()  != null ? matchY.get(ff.getLeftChild())  : null;
-            Double ry = ff.getRightChild() != null ? matchY.get(ff.getRightChild()) : null;
-            if (ly != null && ry != null) matchY.put(ff, (ly + ry) / 2.0);
-        }
-        if (champMatch != null) {
-            Double ly = champMatch.getLeftChild()  != null ? matchY.get(champMatch.getLeftChild())  : null;
-            Double ry = champMatch.getRightChild() != null ? matchY.get(champMatch.getRightChild()) : null;
-            if (ly != null && ry != null) matchY.put(champMatch, (ly + ry) / 2.0);
-        }
-
         // ── Canvas ────────────────────────────────────────────────────
         double maxY    = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        double canvasW = mainX2 + CARD_W + 60;
+        double canvasW = piGfX + CARD_W + 60;
         double canvasH = maxY + CARD_H + 60;
 
         Pane pane = new Pane();
         pane.setPrefSize(canvasW, canvasH);
-        pane.setStyle("-fx-background-color: #f8f8f8;");
+        pane.setStyle("-fx-background-color: #040D43;");
 
         Canvas canvas = new Canvas(canvasW, canvasH);
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -1048,7 +1231,7 @@ public class app extends Application {
 
         // ── Play-in WB lines (only when play-in WB exists) ───────────
         if (hasPiWb) {
-            gc.setStroke(Color.web("#27ae60"));
+            gc.setStroke(Color.web("#FFBA09"));
             for (int r = 2; r <= piWbRounds; r++) {
                 List<Match> curr = piWbByRound.get(r);
                 if (curr == null) continue;
@@ -1064,7 +1247,7 @@ public class app extends Application {
 
         // ── Play-in LB lines (only when play-in LB exists) ───────────
         if (hasPiLb) {
-            gc.setStroke(Color.web("#e74c3c"));
+            gc.setStroke(Color.web("#FFBA09"));
             for (int ri = 1; ri < piLbRounds.size(); ri++) {
                 List<Match> currMs = piLbByRound.get(piLbRounds.get(ri - 1));
                 List<Match> nextMs = piLbByRound.get(piLbRounds.get(ri));
@@ -1105,45 +1288,15 @@ public class app extends Application {
             }
         }
 
-        // ── Dashed arrows: play-in area → main bracket SFs ───────────
-        if (hasPlayIn) {
-            gc.setStroke(Color.web("#3498db")); gc.setLineWidth(1.5); gc.setLineDashes(8, 5);
-            for (Match sf : sfMatches) {
-                if (!matchY.containsKey(sf)) continue;
-                double sfMidY = matchY.get(sf) + CARD_MID;
-                gc.strokeLine(piGfX + CARD_W + 10, sfMidY, mainX0, sfMidY);
-            }
-            gc.setLineDashes(null);
-        }
-
-        // ── Main bracket SF → FF lines (purple) ──────────────────────
-        gc.setStroke(Color.web("#8e44ad")); gc.setLineWidth(2.5);
-        for (Match ff : ffMatches) {
-            if (!matchY.containsKey(ff)) continue;
-            double tgtY = matchY.get(ff) + CARD_MID, srcRX = mainX0 + CARD_W, midX = (srcRX + mainX1) / 2.0;
-            drawBracketLine(gc, ff.getLeftChild(),  matchY, srcRX, midX, mainX1, tgtY, CARD_MID);
-            drawBracketLine(gc, ff.getRightChild(), matchY, srcRX, midX, mainX1, tgtY, CARD_MID);
-        }
-
-        // ── FF → Championship lines (gold) ────────────────────────────
-        gc.setStroke(Color.web("#f39c12")); gc.setLineWidth(3);
-        if (champMatch != null && matchY.containsKey(champMatch)) {
-            double tgtY = matchY.get(champMatch) + CARD_MID, srcRX = mainX1 + CARD_W, midX = (srcRX + mainX2) / 2.0;
-            drawBracketLine(gc, champMatch.getLeftChild(),  matchY, srcRX, midX, mainX2, tgtY, CARD_MID);
-            drawBracketLine(gc, champMatch.getRightChild(), matchY, srcRX, midX, mainX2, tgtY, CARD_MID);
-        }
-
         pane.getChildren().add(canvas);
 
         // ── Section labels (only shown when the section has content) ─
         if (hasPiWb)
-            addPaneLabel(pane, "🎯 PLAY-IN — WINNERS BRACKET", colX[0], TOP_PAD - 50, "#27ae60", FontWeight.BOLD, 13);
+            addPaneLabel(pane, "WINNERS BRACKET", colX[0], TOP_PAD - 50, "#FFBA09", FontWeight.BOLD, 13);
         if (hasPiLb)
-            addPaneLabel(pane, "💀 PLAY-IN — LOSERS BRACKET",  colX[0], lbOffsetY + 10, "#e74c3c", FontWeight.BOLD, 13);
+            addPaneLabel(pane, "LOSERS BRACKET",  colX[0], lbOffsetY + 10, "#FFBA09", FontWeight.BOLD, 13);
         if (hasPiGF)
-            addPaneLabel(pane, "🏅 PLAY-IN GRAND FINAL", piGfX, piGfY - 22, "#e67e22", FontWeight.BOLD, 12);
-        addPaneLabel(pane, "🏆 MAIN BRACKET", mainX0, TOP_PAD - 50, "#8e44ad", FontWeight.BOLD, 13);
-
+            addPaneLabel(pane, "Grand Finals", piGfX, piGfY - 22, "#FFD862", FontWeight.BOLD, 12);
         // Play-in WB round labels
         if (hasPiWb) {
             for (Map.Entry<Integer, List<Match>> e : piWbByRound.entrySet()) {
@@ -1151,8 +1304,8 @@ public class app extends Application {
                 double topY = e.getValue().stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
                 if (topY == Double.MAX_VALUE) continue;
                 int fromEnd = piWbRounds - r;
-                String rName = fromEnd == 0 ? "WB Final" : fromEnd == 1 ? "WB Semis" : "WB R" + r;
-                Label rl = styledLabel(rName, "#27ae60", FontWeight.BOLD, 11);
+                String rName = fromEnd == 0 ? "Upper Final" : fromEnd == 1 ? "Upper Semifinals" : "Upper Round " + r;
+                Label rl = styledLabel(rName, "#FFD862", FontWeight.BOLD, 11);
                 rl.setLayoutX(colX[r - 1]); rl.setLayoutY(topY - 18);
                 pane.getChildren().add(rl);
             }
@@ -1163,28 +1316,13 @@ public class app extends Application {
                 int col = piLbRoundToCol.get(r);
                 double topY = piLbByRound.get(r).stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
                 if (topY == Double.MAX_VALUE) continue;
-                Label rl = styledLabel("LB R" + (col + 1), "#e74c3c", FontWeight.BOLD, 11);
+                Label rl = styledLabel("Losers Round " + (col + 1), "#FFD862", FontWeight.BOLD, 11);
                 rl.setLayoutX(colX[col]); rl.setLayoutY(topY - 18);
                 pane.getChildren().add(rl);
             }
         }
 
-        // Bye-seed badges
-        Team[] byeTeams = tournament.getByeTeams();
-        int[] byePairing = {0, 3, 1, 2};
-        for (int i = 0; i < sfMatches.size() && byeTeams != null && i < byePairing.length && byePairing[i] < byeTeams.length; i++) {
-            Label byeLbl = new Label("⭐ SEED #" + (byePairing[i] + 1) + " — " + byeTeams[byePairing[i]].getName());
-            byeLbl.setStyle(
-                "-fx-background-color: #f1c40f; -fx-text-fill: #2c3e50;" +
-                "-fx-font-weight: bold; -fx-font-size: 10px;" +
-                "-fx-padding: 2 6; -fx-background-radius: 3;");
-            double sfY = matchY.getOrDefault(sfMatches.get(i), TOP_PAD + i * sfSlotH);
-            byeLbl.setLayoutX(mainX0); byeLbl.setLayoutY(sfY - 20);
-            pane.getChildren().add(byeLbl);
-        }
-
-        // ── Place match cards ─────────────────────────────────────────
-        // Play-in WB cards
+        addScrollPane(pane, 600);
         if (hasPiWb) {
             for (Map.Entry<Integer, List<Match>> e : piWbByRound.entrySet()) {
                 int r = e.getKey();
@@ -1217,253 +1355,12 @@ public class app extends Application {
             card.setPrefWidth(CARD_W); card.setMaxWidth(CARD_W);
             pane.getChildren().add(card);
         }
-        // Main bracket SFs
-        for (Match sf : sfMatches) {
-            if (!matchY.containsKey(sf)) continue;
-            VBox card = createMainBracketCard(sf, "Semifinal", "#8e44ad");
-            card.setLayoutX(mainX0); card.setLayoutY(matchY.get(sf));
-            card.setPrefWidth(CARD_W + 20); card.setMaxWidth(CARD_W + 20);
-            pane.getChildren().add(card);
-        }
-        // Main bracket FFs
-        for (Match ff : ffMatches) {
-            if (!matchY.containsKey(ff)) continue;
-            VBox card = createMainBracketCard(ff, "Final Four", "#8e44ad");
-            card.setLayoutX(mainX1); card.setLayoutY(matchY.get(ff));
-            card.setPrefWidth(CARD_W + 20); card.setMaxWidth(CARD_W + 20);
-            pane.getChildren().add(card);
-        }
-        // Championship
-        if (champMatch != null && matchY.containsKey(champMatch)) {
-            VBox card = createMainBracketCard(champMatch, "CHAMPIONSHIP", "#e67e22");
-            card.setLayoutX(mainX2); card.setLayoutY(matchY.get(champMatch));
-            card.setPrefWidth(CARD_W + 30); card.setMaxWidth(CARD_W + 30);
-            pane.getChildren().add(card);
-        }
-
         addScrollPane(pane, 600);
         Team champion = tournament.getTournamentWinner();
         if (champion != null) addChampionDisplay(champion);
     }
 
-    // =========================================================================
-    // PLAY-IN SINGLE ELIMINATION
-    // =========================================================================
-
-    private void displayPlayInSE() {
-        final double CARD_W      = 180;
-        final double CARD_H      = 68;
-        final double CARD_MID    = CARD_H / 2.0;
-        final double COL_GAP     = 70;
-        final double MATCH_V_GAP = 24;
-        final double TOP_PAD     = 80;
-
-        List<Match> piMatches = tournament.getPlayInMatches();
-        Map<Integer, List<Match>> piByRound = new HashMap<>();
-        for (Match m : piMatches)
-            piByRound.computeIfAbsent(m.getRound(), k -> new ArrayList<>()).add(m);
-        List<Integer> piRoundKeys = new ArrayList<>(piByRound.keySet());
-        java.util.Collections.sort(piRoundKeys);
-
-        List<Match> mainMatches = tournament.getMainBracketMatches();
-        Map<Integer, List<Match>> mainByRound = new HashMap<>();
-        for (Match m : mainMatches)
-            mainByRound.computeIfAbsent(m.getRound(), k -> new ArrayList<>()).add(m);
-        List<Integer> mainRoundKeys = new ArrayList<>(mainByRound.keySet());
-        java.util.Collections.sort(mainRoundKeys);
-
-        double colStride = CARD_W + COL_GAP;
-        int piCols   = piRoundKeys.size();
-        int mainCols = mainRoundKeys.size();
-
-        Map<Integer, Double> piColX   = new HashMap<>();
-        Map<Integer, Double> mainColX = new HashMap<>();
-        for (int i = 0; i < piCols;   i++) piColX.put(piRoundKeys.get(i),   20 + i * colStride);
-        double mainStartX = 20 + (piCols + 1) * colStride;
-        for (int i = 0; i < mainCols; i++) mainColX.put(mainRoundKeys.get(i), mainStartX + i * colStride);
-
-        Map<Match, Double> matchY = new HashMap<>();
-        if (!piRoundKeys.isEmpty()) {
-            List<Match> r1 = piByRound.get(piRoundKeys.get(0));
-            double slotH = CARD_H + MATCH_V_GAP;
-            for (int i = 0; i < r1.size(); i++) matchY.put(r1.get(i), TOP_PAD + i * slotH);
-            for (int ri = 1; ri < piRoundKeys.size(); ri++) {
-                List<Match> curr = piByRound.get(piRoundKeys.get(ri));
-                if (curr == null) continue;
-                for (Match m : curr) {
-                    Double ly = m.getLeftChild()  != null ? matchY.get(m.getLeftChild())  : null;
-                    Double ry = m.getRightChild() != null ? matchY.get(m.getRightChild()) : null;
-                    if      (ly != null && ry != null) matchY.put(m, (ly + ry) / 2.0);
-                    else if (ly != null)               matchY.put(m, ly);
-                    else if (ry != null)               matchY.put(m, ry);
-                    else {
-                        List<Match> prev = piByRound.get(piRoundKeys.get(ri - 1));
-                        if (prev != null) {
-                            int idx = curr.indexOf(m), i1 = idx * 2, i2 = idx * 2 + 1;
-                            if (i2 < prev.size())
-                                matchY.put(m, (matchY.getOrDefault(prev.get(i1), TOP_PAD) + matchY.getOrDefault(prev.get(i2), TOP_PAD)) / 2.0);
-                            else if (i1 < prev.size())
-                                matchY.put(m, matchY.getOrDefault(prev.get(i1), TOP_PAD));
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!mainRoundKeys.isEmpty()) {
-            List<Match> mr1 = mainByRound.get(mainRoundKeys.get(0));
-            double slotH = CARD_H + MATCH_V_GAP;
-            for (int i = 0; i < mr1.size(); i++) matchY.put(mr1.get(i), TOP_PAD + i * slotH);
-            for (int ri = 1; ri < mainRoundKeys.size(); ri++) {
-                List<Match> curr = mainByRound.get(mainRoundKeys.get(ri));
-                if (curr == null) continue;
-                for (Match m : curr) {
-                    Double ly = m.getLeftChild()  != null ? matchY.get(m.getLeftChild())  : null;
-                    Double ry = m.getRightChild() != null ? matchY.get(m.getRightChild()) : null;
-                    if      (ly != null && ry != null) matchY.put(m, (ly + ry) / 2.0);
-                    else if (ly != null)               matchY.put(m, ly);
-                    else if (ry != null)               matchY.put(m, ry);
-                }
-            }
-        }
-
-        double maxY    = matchY.values().stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        double canvasW = (mainCols > 0
-            ? mainColX.get(mainRoundKeys.get(mainCols - 1)) + CARD_W + 60
-            : mainStartX + 60);
-        double canvasH = maxY + CARD_H + 60;
-
-        Pane pane = new Pane();
-        pane.setPrefSize(canvasW, canvasH);
-        pane.setStyle("-fx-background-color: #f8f8f8;");
-        Canvas canvas = new Canvas(canvasW, canvasH);
-        GraphicsContext gc = canvas.getGraphicsContext2D();
-        gc.setLineWidth(2);
-
-        gc.setStroke(Color.web("#27ae60"));
-        for (int ri = 1; ri < piRoundKeys.size(); ri++) {
-            List<Match> curr = piByRound.get(piRoundKeys.get(ri));
-            if (curr == null) continue;
-            double srcRX = piColX.get(piRoundKeys.get(ri - 1)) + CARD_W;
-            double dstLX = piColX.get(piRoundKeys.get(ri));
-            double midX  = (srcRX + dstLX) / 2.0;
-            for (Match m : curr) {
-                if (!matchY.containsKey(m)) continue;
-                double tgtY = matchY.get(m) + CARD_MID;
-                drawBracketLine(gc, m.getLeftChild(),  matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-                drawBracketLine(gc, m.getRightChild(), matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-            }
-        }
-
-        gc.setStroke(Color.web("#3498db")); gc.setLineWidth(1.5); gc.setLineDashes(8, 5);
-        if (!mainRoundKeys.isEmpty()) {
-            List<Match> mainR1 = mainByRound.get(mainRoundKeys.get(0));
-            double mainR1X = mainColX.get(mainRoundKeys.get(0));
-            double piRightX = piCols > 0
-                ? piColX.get(piRoundKeys.get(piCols - 1)) + CARD_W
-                : mainStartX - COL_GAP;
-            for (Match m : mainR1) {
-                if (!matchY.containsKey(m)) continue;
-                if (m.getTeam1() == null || m.getTeam2() == null) {
-                    double tgtY = matchY.get(m) + CARD_MID;
-                    gc.strokeLine(piRightX, tgtY, mainR1X, tgtY);
-                }
-            }
-        }
-        gc.setLineDashes(null);
-
-        gc.setStroke(Color.web("#8e44ad")); gc.setLineWidth(2.5);
-        for (int ri = 1; ri < mainRoundKeys.size(); ri++) {
-            List<Match> curr = mainByRound.get(mainRoundKeys.get(ri));
-            if (curr == null) continue;
-            double srcRX = mainColX.get(mainRoundKeys.get(ri - 1)) + CARD_W;
-            double dstLX = mainColX.get(mainRoundKeys.get(ri));
-            double midX  = (srcRX + dstLX) / 2.0;
-            for (Match m : curr) {
-                if (!matchY.containsKey(m)) continue;
-                double tgtY = matchY.get(m) + CARD_MID;
-                drawBracketLine(gc, m.getLeftChild(),  matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-                drawBracketLine(gc, m.getRightChild(), matchY, srcRX, midX, dstLX, tgtY, CARD_MID);
-            }
-        }
-        pane.getChildren().add(canvas);
-
-        if (piCols > 0) {
-            double piLabelX = piColX.get(piRoundKeys.get(0));
-            addPaneLabel(pane, "🎯 PLAY-IN BRACKET", piLabelX, TOP_PAD - 50, "#27ae60", FontWeight.BOLD, 13);
-            for (int ri = 0; ri < piRoundKeys.size(); ri++) {
-                int r = piRoundKeys.get(ri);
-                List<Match> rms = piByRound.get(r);
-                double topY = rms.stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
-                if (topY == Double.MAX_VALUE) continue;
-                int fromEnd = piRoundKeys.size() - 1 - ri;
-                String rName = fromEnd == 0 ? "PI Final" : fromEnd == 1 ? "PI Semis" : "PI R" + r;
-                Label lbl = styledLabel(rName, "#27ae60", FontWeight.BOLD, 11);
-                lbl.setLayoutX(piColX.get(r)); lbl.setLayoutY(topY - 18);
-                pane.getChildren().add(lbl);
-            }
-        }
-        if (mainCols > 0) {
-            addPaneLabel(pane, "🏆 MAIN BRACKET", mainColX.get(mainRoundKeys.get(0)), TOP_PAD - 50, "#8e44ad", FontWeight.BOLD, 13);
-            for (int ri = 0; ri < mainRoundKeys.size(); ri++) {
-                int r = mainRoundKeys.get(ri);
-                List<Match> rms = mainByRound.get(r);
-                double topY = rms.stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
-                if (topY == Double.MAX_VALUE) continue;
-                int fromEnd = mainRoundKeys.size() - 1 - ri;
-                String rName = fromEnd == 0 ? "Championship" : fromEnd == 1 ? "Semifinals" : fromEnd == 2 ? "Quarterfinals" : "Round " + r;
-                Label lbl = styledLabel(rName, "#8e44ad", FontWeight.BOLD, 11);
-                lbl.setLayoutX(mainColX.get(r)); lbl.setLayoutY(topY - 18);
-                pane.getChildren().add(lbl);
-            }
-        }
-
-        Team[] byeSeeds = tournament.getByeTeams();
-        if (byeSeeds != null && !mainRoundKeys.isEmpty()) {
-            List<Match> mr1 = mainByRound.get(mainRoundKeys.get(0));
-            double mr1X = mainColX.get(mainRoundKeys.get(0));
-            for (int i = 0; i < mr1.size(); i++) {
-                Match m = mr1.get(i);
-                if (!matchY.containsKey(m)) continue;
-                Team byeSeed = (m.getTeam1() != null) ? m.getTeam1()
-                             : (m.getTeam2() != null) ? m.getTeam2() : null;
-                if (byeSeed == null) continue;
-                int seedNum = byeSeed.getId() + 1;
-                Label lbl = new Label("⭐ SEED #" + seedNum + " — " + byeSeed.getName());
-                lbl.setStyle("-fx-background-color: #f1c40f; -fx-text-fill: #2c3e50;" +
-                             "-fx-font-weight: bold; -fx-font-size: 10px;" +
-                             "-fx-padding: 2 6; -fx-background-radius: 3;");
-                lbl.setLayoutX(mr1X); lbl.setLayoutY(matchY.get(m) - 18);
-                pane.getChildren().add(lbl);
-            }
-        }
-
-        for (int r : piRoundKeys) {
-            for (Match m : piByRound.get(r)) {
-                if (!matchY.containsKey(m)) continue;
-                boolean isLast = r == piRoundKeys.get(piRoundKeys.size() - 1);
-                VBox card = createDeMatchCard(m, true, isLast);
-                card.setLayoutX(piColX.get(r)); card.setLayoutY(matchY.get(m));
-                card.setPrefWidth(CARD_W); card.setMaxWidth(CARD_W);
-                pane.getChildren().add(card);
-            }
-        }
-        for (int r : mainRoundKeys) {
-            for (Match m : mainByRound.get(r)) {
-                if (!matchY.containsKey(m)) continue;
-                boolean isChamp = r == mainRoundKeys.get(mainRoundKeys.size() - 1);
-                VBox card = createMainBracketCard(m, isChamp ? "CHAMPIONSHIP" : null, isChamp ? "#e67e22" : "#8e44ad");
-                card.setLayoutX(mainColX.get(r)); card.setLayoutY(matchY.get(m));
-                card.setPrefWidth(CARD_W + (isChamp ? 20 : 0)); card.setMaxWidth(CARD_W + (isChamp ? 20 : 0));
-                pane.getChildren().add(card);
-            }
-        }
-
-        addScrollPane(pane, 600);
-        Team champion = tournament.getTournamentWinner();
-        if (champion != null) addChampionDisplay(champion);
-    }
-
+ 
     // =========================================================================
     // PLAY-IN SE UNIFIED DISPLAY (10 and 20 teams)
     // =========================================================================
@@ -1558,11 +1455,11 @@ public class app extends Application {
 
         Pane pane = new Pane();
         pane.setPrefSize(canvasW, canvasH);
-        pane.setStyle("-fx-background-color: #f8f8f8;");
+        pane.setStyle("-fx-background-color: #040D43;");
 
         Canvas canvas = new Canvas(canvasW, canvasH);
         GraphicsContext gc = canvas.getGraphicsContext2D();
-        gc.setStroke(Color.web("#27ae60"));
+        gc.setStroke(Color.web("#FFBA09"));
         gc.setLineWidth(2);
 
         for (int ri = 1; ri < allPiKeys.size(); ri++) {
@@ -1616,7 +1513,7 @@ public class app extends Application {
         int totalVisibleCols = piCols + mainCols;
         for (int ci = 0; ci < piCols; ci++) {
             int fromEnd = totalVisibleCols - 1 - ci;
-            String rName = fromEnd == 0 ? "Final"
+            String rName = fromEnd == 0 ? "Finals"
                          : fromEnd == 1 ? "Semifinals"
                          : fromEnd == 2 ? "Quarterfinals"
                          : "Round " + (ci + 1);
@@ -1624,13 +1521,13 @@ public class app extends Application {
             if (rMs == null) continue;
             double topY = rMs.stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
             if (topY == Double.MAX_VALUE) continue;
-            Label lbl = styledLabel(rName, "#2c3e50", FontWeight.BOLD, 11);
+            Label lbl = styledLabel(rName, "#FFD862", FontWeight.BOLD, 11);
             lbl.setLayoutX(colX[ci]); lbl.setLayoutY(topY - 18);
             pane.getChildren().add(lbl);
         }
         for (int ci = 0; ci < mainCols; ci++) {
             int fromEnd = totalVisibleCols - 1 - (piCols + ci);
-            String rName = fromEnd == 0 ? "Final"
+            String rName = fromEnd == 0 ? "Finals"
                          : fromEnd == 1 ? "Semifinals"
                          : fromEnd == 2 ? "Quarterfinals"
                          : "Round " + (piCols + ci + 1);
@@ -1638,7 +1535,7 @@ public class app extends Application {
             if (rMs == null) continue;
             double topY = rMs.stream().filter(matchY::containsKey).mapToDouble(matchY::get).min().orElse(Double.MAX_VALUE);
             if (topY == Double.MAX_VALUE) continue;
-            Label lbl = styledLabel(rName, "#2c3e50", FontWeight.BOLD, 11);
+            Label lbl = styledLabel(rName, "#FFD862", FontWeight.BOLD, 11);
             lbl.setLayoutX(colX[piCols + ci]); lbl.setLayoutY(topY - 18);
             pane.getChildren().add(lbl);
         }
@@ -1675,9 +1572,7 @@ public class app extends Application {
     // =========================================================================
 
     private VBox createDeMatchCard(Match match, boolean isWinners, boolean isGrandFinal) {
-        String border  = isGrandFinal ? "#f39c12" : (isWinners ? "#27ae60" : "#e74c3c");
-        String bg      = isGrandFinal ? "#fff8e1" : "white";
-        String hoverBg = isGrandFinal ? "#fff0cc" : (isWinners ? "#f0fff4" : "#fff0f0");
+        String border  = isGrandFinal ? "#FFBA09" : (isWinners ? "#FFBA09" : "#FFBA09");
 
         String t1Name = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
         String t2Name = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
@@ -1688,8 +1583,8 @@ public class app extends Application {
         boolean canReport = !done && match.getTeam1() != null && match.getTeam2() != null
                             && !t1Name.equals("TBD") && !t2Name.equals("TBD");
 
-        String normalStyle = "-fx-background-color:" + bg + ";-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;" + (canReport ? "-fx-cursor:hand;" : "");
-        String hoverStyle  = "-fx-background-color:" + hoverBg + ";-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-cursor:hand;";
+        String normalStyle = "-fx-background-color:#152055;-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;" + (canReport ? "-fx-cursor:hand;" : "");
+        String hoverStyle  = "-fx-background-color:#152055;-fx-border-color:#FFBA09;-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-cursor:hand;";
 
         VBox card = new VBox(2);
         card.setAlignment(Pos.CENTER_LEFT);
@@ -1707,116 +1602,50 @@ public class app extends Application {
             makeTeamRow(t2Name, score, 1, done, winner)
         );
 
-        if (isGrandFinal && done && winner != null) {
-            Label champ = new Label("🏆 " + winner.getName());
-            champ.setFont(Font.font("Arial", FontWeight.BOLD, 10));
-            champ.setTextFill(Color.web("#e67e22"));
-            card.getChildren().add(champ);
-        }
-        return card;
-    }
-
-    private VBox createMainBracketCard(Match match, String roundLabel, String accentColor) {
-        boolean done  = match.isCompleted();
-        Team winner   = match.getWinner();
-        String t1Name = match.getTeam1() != null ? match.getTeam1().getName() : "— BYE SEED —";
-        String t2Name = match.getTeam2() != null ? match.getTeam2().getName() : "Waiting for play-in…";
-        String score  = match.getScore() != null ? match.getScore() : "";
-        boolean canReport = !done && match.getTeam1() != null && match.getTeam2() != null;
-
-        String normalStyle = "-fx-background-color:#fff8e1;-fx-border-color:" + accentColor + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;" + (canReport ? "-fx-cursor:hand;" : "");
-        String hoverStyle  = "-fx-background-color:#fff0cc;-fx-border-color:" + accentColor + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-cursor:hand;";
-
-        VBox card = new VBox(2);
-        card.setAlignment(Pos.CENTER_LEFT);
-        card.setPadding(new Insets(4, 8, 4, 8));
-        card.setStyle(normalStyle);
-        if (canReport) {
-            card.setOnMouseEntered(e -> card.setStyle(hoverStyle));
-            card.setOnMouseExited(e  -> card.setStyle(normalStyle));
-            card.setOnMouseClicked(e -> showScoreDialog(match));
-        }
-
-        HBox row1 = new HBox(4);
-        row1.setAlignment(Pos.CENTER_LEFT);
-        Label seedBadge = new Label();
-        if (match.getTeam1() != null && tournament.getByeTeams() != null) {
-            Team[] bt = tournament.getByeTeams();
-            for (int i = 0; i < bt.length; i++) {
-                if (bt[i] == match.getTeam1()) {
-                    seedBadge.setText("#" + (i + 1));
-                    seedBadge.setStyle("-fx-background-color:#f1c40f;-fx-text-fill:#2c3e50;-fx-font-size:9px;-fx-font-weight:bold;-fx-padding:1 4;-fx-background-radius:3;");
-                    break;
-                }
-            }
-        }
-        Label lbl1 = new Label(t1Name);
-        lbl1.setFont(Font.font("Arial", FontWeight.BOLD, 11));
-        lbl1.setMaxWidth(125);
-        lbl1.setTextFill(done && winner != null && !winner.getName().equals(t1Name) ? Color.GRAY : Color.web("#2c3e50"));
-        Label sc1 = new Label(done && !score.isEmpty() ? score.split("-")[0].trim() : "");
-        sc1.setFont(Font.font("Arial", 11));
-        Region sp1 = new Region(); HBox.setHgrow(sp1, Priority.ALWAYS);
-        row1.getChildren().addAll(seedBadge, lbl1, sp1, sc1);
-
-        HBox row2 = new HBox(4);
-        row2.setAlignment(Pos.CENTER_LEFT);
-        Label lbl2 = new Label(t2Name);
-        lbl2.setFont(Font.font("Arial", match.getTeam2() == null ? FontWeight.NORMAL : FontWeight.BOLD, 11));
-        lbl2.setMaxWidth(140);
-        lbl2.setTextFill(match.getTeam2() == null ? Color.web("#aaaaaa")
-            : (done && winner != null && !winner.getName().equals(t2Name)) ? Color.GRAY : Color.web("#2c3e50"));
-        Label sc2 = new Label(done && !score.isEmpty() && score.split("-").length > 1 ? score.split("-")[1].trim() : "");
-        sc2.setFont(Font.font("Arial", 11));
-        Region sp2 = new Region(); HBox.setHgrow(sp2, Priority.ALWAYS);
-        row2.getChildren().addAll(lbl2, sp2, sc2);
-
-        Label roundLbl = new Label(roundLabel);
-        roundLbl.setStyle("-fx-font-size:9px;-fx-text-fill:" + accentColor + ";-fx-font-weight:bold;");
-
-        card.getChildren().addAll(row1, makeSeparator(), row2, roundLbl);
-
-        if (done && winner != null) {
-            Label wLbl = new Label("🏆 " + winner.getName());
-            wLbl.setFont(Font.font("Arial", FontWeight.BOLD, 10));
-            wLbl.setTextFill(Color.web("#e67e22"));
-            card.getChildren().add(wLbl);
-        }
         return card;
     }
 
     private HBox makeTeamRow(String teamName, String score, int teamIndex, boolean done, Team winner) {
-        HBox row = new HBox(4);
-        row.setAlignment(Pos.CENTER_LEFT);
-        Label lbl = new Label(teamName);
-        lbl.setFont(Font.font("Arial", FontWeight.BOLD, 11));
-        lbl.setMaxWidth(120);
-        lbl.setWrapText(false);
-        Label sc = new Label();
-        sc.setFont(Font.font("Arial", 11));
-        if (done && !score.isEmpty()) {
-            String[] p = score.split("-");
-            if (teamIndex < p.length) sc.setText(p[teamIndex].trim());
-            Color c = (winner != null && winner.getName().equals(teamName)) ? Color.web("#27ae60") : Color.GRAY;
-            lbl.setTextFill(c); sc.setTextFill(c);
+    HBox row = new HBox(4);
+    row.setAlignment(Pos.CENTER_LEFT);
+    row.setPadding(new Insets(1, 2, 1, 2));
+    Label lbl = new Label(teamName);
+    lbl.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+    lbl.setMaxWidth(120);
+    lbl.setWrapText(false);
+    lbl.setStyle("-fx-text-fill: #E0E6ED;");
+    Label sc = new Label();
+    sc.setFont(Font.font("Arial", 11));
+    sc.setStyle("-fx-text-fill: #FFD862;");
+    if (done && !score.isEmpty()) {
+        String[] p = score.split("-");
+        if (teamIndex < p.length) sc.setText(p[teamIndex].trim());
+        boolean isWinner = winner != null && winner.getName().equals(teamName);
+        if (isWinner) {
+            lbl.setStyle("-fx-text-fill: #FFC107 ; -fx-font-weight: bold;");
+            sc.setStyle("-fx-text-fill: #FFC107 ;");
+        } else {
+            lbl.setStyle("-fx-text-fill: #FCEB92 ; -fx-font-weight: normal;");
+            sc.setStyle("-fx-text-fill: #FCEB92 ;");
+            row.setStyle("-fx-background-color: #eeeeee80; -fx-background-radius: 3;");
         }
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        row.getChildren().addAll(lbl, spacer, sc);
-        return row;
     }
-
+    Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
+    row.getChildren().addAll(lbl, spacer, sc);
+    return row;
+}
     private Separator makeSeparator() {
         Separator sep = new Separator();
-        sep.setStyle("-fx-background-color: #ddd;");
+        sep.setStyle("-fx-background-color: #FFBA09;");
         return sep;
     }
 
     private String getWinnersRoundName(int round, int totalWinnersRounds) {
         int fromEnd = totalWinnersRounds - round;
-        if (fromEnd == 0) return "Upper Final";
-        if (fromEnd == 1) return "Upper Semis";
-        if (fromEnd == 2) return "Upper QF";
-        return "Upper R" + round;
+        if (fromEnd == 0) return "Upper Finals";
+        if (fromEnd == 1) return "Upper Semifinals";
+        if (fromEnd == 2) return "Quarterfinals";
+        return "Upper Round " + round;
     }
 
     // =========================================================================
@@ -1985,10 +1814,10 @@ public class app extends Application {
     private void addChampionDisplay(Team champion) {
         HBox box = new HBox();
         box.setAlignment(Pos.CENTER);
-        box.setStyle("-fx-background-color: #f1c40f; -fx-border-radius: 8; -fx-padding: 15;");
-        Label lbl = new Label("🏆 CHAMPION: " + champion.getName() + " 🏆");
+        box.setStyle("-fx-background-color: #152055;-fx-border-color: #7F8EE3  09; -fx-border-radius: 8; -fx-padding: 15;");
+        Label lbl = new Label("CHAMPION: " + champion.getName() + "");
         lbl.setFont(Font.font("Arial", FontWeight.BOLD, 16));
-        lbl.setTextFill(Color.web("#2c3e50"));
+        lbl.setTextFill(Color.web("#FFD862"));
         box.getChildren().add(lbl);
         bracketView.getChildren().add(box);
     }
@@ -2008,37 +1837,76 @@ public class app extends Application {
         VBox vbox = new VBox(15);
         vbox.setPadding(new Insets(20));
         vbox.setAlignment(Pos.CENTER);
-        vbox.setStyle("-fx-background-color: white;");
+        vbox.setStyle("-fx-background-color: #040D43;");
 
         Label titleLbl = new Label(match.getTeam1().getName() + " vs " + match.getTeam2().getName());
         titleLbl.setFont(Font.font("Arial", FontWeight.BOLD, 16));
-        titleLbl.setTextFill(Color.web("#2c3e50"));
+        titleLbl.setTextFill(Color.web("#FFD862"));
 
         TextField s1 = new TextField(); s1.setPromptText("Score"); s1.setPrefWidth(80);
-        TextField s2 = new TextField(); s2.setPromptText("Score"); s2.setPrefWidth(80);
-        ComboBox<Team> winnerCombo = new ComboBox<>();
-        winnerCombo.getItems().addAll(match.getTeam1(), match.getTeam2());
-        winnerCombo.setPromptText("Select winner"); winnerCombo.setPrefWidth(150);
+        TextField s2 = new TextField(); s2.setPromptText("Score"); s2.setPrefWidth(80); 
+        s1.setStyle("-fx-background-color: #152055; -fx-text-fill: #FFFFFF; -fx-prompt-text-fill: #ffffffa2; -fx-border-color: #7F8EE3; -fx-border-radius: 4; -fx-background-radius: 4; -fx-padding: 6;");
+        s2.setStyle("-fx-background-color: #152055; -fx-text-fill: #FFFFFF; -fx-prompt-text-fill: #ffffffa2; -fx-border-color: #7F8EE3; -fx-border-radius: 4; -fx-background-radius: 4; -fx-padding: 6;");
 
-        HBox r1b = new HBox(10, new Label(match.getTeam1().getName() + ":"), s1); r1b.setAlignment(Pos.CENTER);
-        HBox r2b = new HBox(10, new Label(match.getTeam2().getName() + ":"), s2); r2b.setAlignment(Pos.CENTER);
-        HBox wb  = new HBox(10, new Label("Winner:"), winnerCombo); wb.setAlignment(Pos.CENTER);
+        // Dynamic winner preview label (no dropdown — winner is always highest scorer)
+        Label winnerPreview = new Label("Enter the scores");
+        winnerPreview.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        winnerPreview.setTextFill(Color.web("#FFD862"));
+        
+
+        HBox r1b = new HBox(10, new Label(match.getTeam1().getName() + ":") {{ setTextFill(Color.WHITE); setFont(Font.font("Arial", FontWeight.BOLD, 13)); }}, s1); r1b.setAlignment(Pos.CENTER);
+        HBox r2b = new HBox(10, new Label(match.getTeam2().getName() + ":") {{ setTextFill(Color.WHITE); setFont(Font.font("Arial", FontWeight.BOLD, 13)); }}, s2); r2b.setAlignment(Pos.CENTER);
 
         Button submit = new Button("Submit");
-        submit.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 20; -fx-background-radius: 5;");
+        submit.setStyle("-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 20; -fx-background-radius: 5;");
+        submit.setDisable(true);
         Button cancel = new Button("Cancel");
         cancel.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 8 20; -fx-background-radius: 5;");
         HBox btnBox = new HBox(20, submit, cancel); btnBox.setAlignment(Pos.CENTER);
 
-        vbox.getChildren().addAll(titleLbl, r1b, r2b, wb, btnBox);
-        dlg.setScene(new Scene(vbox, 350, 300));
+        vbox.getChildren().addAll(titleLbl, r1b, r2b, winnerPreview, btnBox);
+        dlg.setScene(new Scene(vbox, 350, 270));
+
+        // Auto-determine winner by score as user types — no dropdown needed
+            javafx.beans.value.ChangeListener<String> scoreListener = (obs, oldVal, newVal) -> {
+            try {
+                String t1 = s1.getText().trim(), t2 = s2.getText().trim();
+                if (!t1.isEmpty() && !t2.isEmpty()) {
+                    int sc1 = Integer.parseInt(t1), sc2 = Integer.parseInt(t2);
+                    if (sc1 > sc2) {
+                        winnerPreview.setText("Winner: " + match.getTeam1().getName());
+                        winnerPreview.setStyle("-fx-text-fill: #FFBA09;");
+                        submit.setDisable(false);
+                    } else if (sc2 > sc1) {
+                        winnerPreview.setText("Winner: " + match.getTeam2().getName());
+                        winnerPreview.setStyle("-fx-text-fill: #FFBA09;");
+                        submit.setDisable(false);
+                    } else {
+                        winnerPreview.setText("No ties Allowed");
+                        winnerPreview.setStyle("-fx-text-fill: #e74c3c;");
+                        submit.setDisable(true);
+                    }
+                } else {
+                    winnerPreview.setText("Enter the scores");
+                    winnerPreview.setStyle("-fx-text-fill: #FFD862;");
+                    submit.setDisable(true);
+                }
+            } catch (NumberFormatException ignored) {
+                winnerPreview.setText("Enter valid numbers");
+                winnerPreview.setStyle("-fx-text-fill: #e74c3c;");
+                submit.setDisable(true);
+            }
+};
+        s1.textProperty().addListener(scoreListener);
+        s2.textProperty().addListener(scoreListener);
 
         submit.setOnAction(e -> {
             try {
                 if (s1.getText().isEmpty() || s2.getText().isEmpty()) { showAlert("Error", "Please enter both scores!"); return; }
                 int score1 = Integer.parseInt(s1.getText()), score2 = Integer.parseInt(s2.getText());
-                Team w = winnerCombo.getValue();
-                if (w == null) { showAlert("Error", "Please select the winner!"); return; }
+                if (score1 == score2) { showAlert("Error", "Scores cannot be tied — one team must win!"); return; }
+                // Winner is always determined by higher score — no dropdown needed
+                Team w = score1 > score2 ? match.getTeam1() : match.getTeam2();
                 tournament.recordWinner(match, w, score1, score2);
                 updateBracketView(); updateProgress();
                 showAlert("Success", "Match recorded!\n" + w.getName() + " wins " + score1 + "-" + score2);
@@ -2142,7 +2010,7 @@ public class app extends Application {
         progressLabel.setText(String.format("%d%% Complete", (int)(progress * 100)));
         if (tournament.getTournamentWinner() != null) {
             statusLabel.setText("COMPLETE");
-            statusLabel.setStyle("-fx-font-weight:bold;-fx-font-size:16px;-fx-text-fill:#27ae60;");
+            statusLabel.setStyle("-fx-font-weight:bold;-fx-font-size:16px;-fx-text-fill:#FFBA09;");
         } else {
             statusLabel.setText("PENDING");
             statusLabel.setStyle("-fx-font-weight:bold;-fx-font-size:16px;-fx-text-fill:#e74c3c;");
@@ -2159,16 +2027,36 @@ public class app extends Application {
     }
 
     private void addScrollPane(Pane content, double prefHeight) {
-        ScrollPane sp = new ScrollPane(content);
-        sp.setFitToWidth(false); sp.setFitToHeight(false);
-        sp.setPrefHeight(prefHeight);
-        sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        sp.setStyle("-fx-background: #f8f8f8; -fx-border-color: #ddd;");
-        bracketView.getChildren().clear();
-        bracketView.getChildren().add(sp);
-        VBox.setVgrow(sp, Priority.ALWAYS);
-    }
+    ScrollPane sp = new ScrollPane(content);
+    sp.setFitToWidth(false); sp.setFitToHeight(false);
+    sp.setPrefHeight(prefHeight);
+    sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    sp.setStyle(
+        "-fx-background: #040D43;" +
+        "-fx-background-color: #040D43;" +
+        "-fx-border-color: transparent;" +
+        "-fx-border-width: 0;" +
+        "-fx-focus-color: transparent;" +
+        "-fx-faint-focus-color: transparent;"
+    );
+    sp.getStylesheets().clear();
+    sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        sp.lookupAll(".scroll-bar").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".thumb").forEach(node ->
+            node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 0;"));
+        sp.lookupAll(".track").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".increment-button, .decrement-button").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node ->
+            node.setStyle("-fx-background-color: transparent;"));
+    });
+    bracketView.getChildren().clear();
+    bracketView.getChildren().add(sp);
+    VBox.setVgrow(sp, Priority.ALWAYS);
+}
 
     private void addPaneLabel(Pane pane, String text, double x, double y, String color, FontWeight weight, int size) {
         Label lbl = styledLabel(text, color, weight, size);

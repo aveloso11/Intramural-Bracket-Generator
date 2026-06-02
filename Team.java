@@ -61,22 +61,6 @@ public class Team {
         this.pointsAllowed += scoreAgainst;
     }
     
-    public void addWin() {
-        this.wins++;
-    }
-    
-    public void addLoss() {
-        this.losses++;
-    }
-    
-    public void addPointsScored(int points) {
-        this.pointsScored += points;
-    }
-    
-    public void addPointsAllowed(int points) {
-        this.pointsAllowed += points;
-    }
-    
     @Override
     public String toString() {
         return name;

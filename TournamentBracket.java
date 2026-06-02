@@ -3,13 +3,13 @@ import java.util.*;
 public class TournamentBracket {
     private Match root;
     private Team[] teams;
-    private ScoreMatrix scoreMatrix;
     private int totalRounds;
     private List<Match> allMatches;
     private TournamentType tournamentType;
     private List<Match> losersBracketMatches;
     private Match grandFinals;
     private Map<Match, Match> winnerToLoserMatch;
+    private Map<Match, Match> lbWinnerAdvanceMap;  // maps each LB match → the next LB match its winner feeds into
 
     // ── Play-In specific fields ───────────────────────────────────────────────
     // playInMatches    : all matches inside the DE play-in sub-bracket
@@ -29,10 +29,10 @@ public class TournamentBracket {
     public TournamentBracket(Team[] teams, TournamentType type) {
         Match.resetIdCounter();   // always start match IDs fresh for each new bracket
         this.teams                = teams;
-        this.scoreMatrix          = new ScoreMatrix(teams);
         this.tournamentType       = type;
         this.allMatches           = new ArrayList<>();
         this.winnerToLoserMatch   = new HashMap<>();
+        this.lbWinnerAdvanceMap   = new HashMap<>();
         this.losersBracketMatches = new ArrayList<>();
         this.playInMatches        = new ArrayList<>();
         this.mainBracketMatches   = new ArrayList<>();
@@ -141,6 +141,7 @@ public class TournamentBracket {
         allMatches.clear();
         losersBracketMatches = new ArrayList<>();
         winnerToLoserMatch.clear();
+        lbWinnerAdvanceMap = new HashMap<>();
 
         int matchId       = 1;
         int losersMatchId = 1000;
@@ -208,6 +209,8 @@ public class TournamentBracket {
                 lm.setMatchId(losersMatchId++);
                 lm.setLeftChild(lbSurvivors.get(i));
                 winnerToLoserMatch.put(wbThisRound.get(i), lm);
+                // Wire: winner of lbSurvivors[i] advances into lm as team2
+                lbWinnerAdvanceMap.put(lbSurvivors.get(i), lm);
                 dropRound.add(lm);
                 losersBracketMatches.add(lm);
                 allMatches.add(lm);
@@ -222,6 +225,9 @@ public class TournamentBracket {
                     lm.setMatchId(losersMatchId++);
                     lm.setLeftChild(dropRound.get(i));
                     lm.setRightChild(dropRound.get(i + 1));
+                    // Wire: winners of dropRound matches advance into lm
+                    lbWinnerAdvanceMap.put(dropRound.get(i),     lm);
+                    lbWinnerAdvanceMap.put(dropRound.get(i + 1), lm);
                     elimRound.add(lm);
                     losersBracketMatches.add(lm);
                     allMatches.add(lm);
@@ -249,42 +255,16 @@ public class TournamentBracket {
             + " total=" + allMatches.size());
     }
 
-    // =========================================================================
-    // PLAY-IN DOUBLE ELIMINATION
-    //
-    //  10 teams → top 2 get byes to WB semis, bottom 8 play DE play-in → 2 survivors
-    //             join top 2 at a 4-team SE main bracket (Semis → Final)
-    //
-    //  20 teams → top 4 get byes to WB semis, bottom 16 play DE play-in → 4 survivors
-    //             join top 4 at an 8-team SE main bracket (QFs → Semis → Final)
-    //
-    //  General rule:
-    //    numByeTeams  = n == 10 ? 2 : 4
-    //    playInSize   = n - numByeTeams  (must be power-of-2)
-    //    numSurvivors = numByeTeams      (play-in survivors = bye count)
-    //    main bracket = (numByeTeams * 2)-team single elimination
-    // =========================================================================
-
     private void buildPlayInDE(Team[] teams) {
         int n = teams.length;
-        // Compute numByeTeams: find the largest power-of-2 that leaves a power-of-2 play-in size
-        // 6  → bye=2, playIn=4   (4-team DE play-in → 1 survivor + 1 bye = 2-team main)
-        // 10 → bye=2, playIn=8   (8-team DE play-in → 2 survivors + 2 byes = 4-team main)
-        // 12 → bye=4, playIn=8   (8-team DE play-in → 2 survivors + 4 byes = 6... use bye=4, pI=8 → 2 surv → 6 main → round up: bye=4, pi=8 → main=6 not power-of-2)
-        //   Better: bye=4, playIn=8 → survivors=4 → main=8. So numSurvivors = numByeTeams.
-        // 20 → bye=4, playIn=16  (16-team DE → 4 survivors + 4 byes = 8-team main)
-        // 24 → bye=8, playIn=16  (16-team DE → 4 survivors + 8 byes = 12 → not power-of-2)
-        //   Better: bye=8, playIn=16 → survivors=8 → main=16-team. Yes.
-        // General: playInSize must be power-of-2; numSurvivors = numByeTeams; main = 2*numByeTeams
         int numByeTeams;
         if      (n == 6)  numByeTeams = 2;
         else if (n == 10) numByeTeams = 2;
         else if (n == 12) numByeTeams = 4;
         else if (n == 20) numByeTeams = 4;
         else if (n == 24) numByeTeams = 8;
-        else              numByeTeams = (n == 10) ? 2 : 4;  // fallback
-        int playInSize   = n - numByeTeams;      // must be power-of-2
-        int numSurvivors = numByeTeams;          // survivors = bye count
+        else              numByeTeams = (n == 10) ? 2 : 4; 
+        int playInSize   = n - numByeTeams;       
 
         allMatches.clear();
         losersBracketMatches = new ArrayList<>();
@@ -921,12 +901,11 @@ public class TournamentBracket {
     public List<Match> getPlayInMatches()         { return playInMatches; }
     public List<Match> getMainBracketMatches()    { return mainBracketMatches; }
     public Team[]      getByeTeams()              { return byeTeams; }
-    public List<Match> getPlayInSlots()           { return playInSlots; }
     public Match       getGrandFinals()           { return grandFinals; }
     public int         getTotalRounds()           { return totalRounds; }
     public Team[]      getTeams()                 { return teams; }
     public Match       getChampionship()          { return root; }
-    public ScoreMatrix getScoreMatrix()           { return scoreMatrix; }
+   
     public int         getPlayInWinnersRounds()   { return playInWinnersRounds; }
     public int         getWinnersRounds() {
         return (int) Math.ceil(Math.log(Math.max(teams.length, 2)) / Math.log(2));
@@ -997,7 +976,6 @@ public class TournamentBracket {
             return;
         }
         match.setWinner(winner, score1, score2);
-        scoreMatrix.recordMatch(match.getTeam1().getId(), match.getTeam2().getId(), score1, score2);
 
         if (tournamentType == TournamentType.SINGLE_ELIMINATION
                 || tournamentType == TournamentType.DOUBLE_ELIMINATION)
@@ -1014,6 +992,7 @@ public class TournamentBracket {
         Team loser = (currentMatch.getTeam1() == winner)
                      ? currentMatch.getTeam2() : currentMatch.getTeam1();
 
+        // ── Feed loser into LB (WB matches only) ─────────────────────────────
         if (tournamentType == TournamentType.DOUBLE_ELIMINATION && loser != null
                 && currentMatch.getTeam1() != null && currentMatch.getTeam2() != null) {
             Match lbSlot = winnerToLoserMatch.get(currentMatch);
@@ -1026,6 +1005,20 @@ public class TournamentBracket {
             }
         }
 
+        // ── Advance winner via lbWinnerAdvanceMap (LB drop/elim rounds) ──────
+        Match nextLb = lbWinnerAdvanceMap.get(currentMatch);
+        if (nextLb != null && !nextLb.isCompleted()) {
+            if (nextLb.getTeam2() == null) {
+                nextLb.setTeam2(winner);
+                System.out.println("→ LB Winner " + winner.getName() + " → match " + nextLb.getMatchId() + " (team2)");
+            } else if (nextLb.getTeam1() == null) {
+                nextLb.setTeam1(winner);
+                System.out.println("→ LB Winner " + winner.getName() + " → match " + nextLb.getMatchId() + " (team1)");
+            }
+            return;
+        }
+
+        // ── Advance winner via child links (WB rounds + GF) ───────────────────
         for (Match m : allMatches) {
             if (m.getLeftChild() == currentMatch) {
                 m.setTeam1(winner);

@@ -47,9 +47,6 @@ public class Match {
     public boolean isMainBracket()         { return isMainBracket; }
     public Match   getMainBracketSlot()    { return mainBracketSlot; }
 
-    public boolean isReady() {
-        return (team1 != null && team2 != null);
-    }
 
     // ── SETTERS ────────────────────────────────────────────────────────────
     public void setLeftChild(Match leftChild)                  { this.leftChild = leftChild; }
@@ -80,9 +77,6 @@ public class Match {
         this.winner = winner;
         this.completed = true;
     }
-
-    public void setScore(String score)          { this.score = score; }
-    public void setCompleted(boolean completed) { this.completed = completed; }
 
     @Override
     public String toString() {
