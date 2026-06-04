@@ -583,13 +583,11 @@ public class app extends Application {
             case "Double Elimination":
                 return (isPowerOfTwo(n) && n >= 4 && n <= 32) || n == 24 || n == 12;
             case "Round Robin":
-                return n >= 3;
-            // Free For All requires at least 4 teams
+                return n >= 4;
             case "Free For All":
                 return n >= 4;
-            // Swiss: 3+
             default:
-                return n >= 3;
+                return n >= 4;
         }
     }
 
