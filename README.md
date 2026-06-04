@@ -5,9 +5,7 @@ A JavaFX desktop app for generating and managing intramural sports tournament br
 ---
 
 ## Features
-- **5 tournament formats:** Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, and Play-In DE
-- Play-In SE [12,24] format
-- Play-In DE [12,24] format
+- **5 and 2 Play-In tournament formats:** Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, and Play-In DE
 - Auto-handles byes, seeding, and bracket propagation
 - Click any match to enter scores — winners advance automatically
 - Full undo stack for reverting results
