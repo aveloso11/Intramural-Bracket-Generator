@@ -14,15 +14,16 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 public class app extends Application {
-
     private TournamentBracket tournament;
     private Team[] teams;
     private VBox participantsList;
@@ -37,10 +38,50 @@ public class app extends Application {
     private CheckBox selectAllCheckBox;
     private double savedScrollH = 0;
     private double savedScrollV = 0;
-   
-
-    // Drag-and-drop state for participant reordering
     private int dragSourceIndex = -1;
+
+     private static class MatchSnapshot {
+        final int    matchId;
+        final String winnerId;
+        final String score;
+
+    MatchSnapshot(int matchId, String winnerId, String score) {
+        this.matchId  = matchId;
+        this.winnerId = winnerId;
+        this.score    = score;
+    }
+}
+
+    private final Deque<List<MatchSnapshot>> undoStack = new ArrayDeque<>();
+
+    private void pushUndoState() {
+        if (tournament == null) return;
+        List<MatchSnapshot> frame = new ArrayList<>();
+        for (Match m : tournament.getAllMatches()) {
+            String winnerName = (m.getWinner() != null) ? m.getWinner().getName() : null;
+            frame.add(new MatchSnapshot(m.getMatchId(), winnerName, m.getScore()));
+        }
+        undoStack.push(frame);
+    }
+
+    private void performUndo() {
+        if (undoStack.isEmpty()) {
+            showAlert("Undo", "Nothing to undo.");
+            return;
+        }
+        List<MatchSnapshot> frame = undoStack.pop();
+        Map<Integer, MatchSnapshot> snapMap = new HashMap<>();
+        for (MatchSnapshot s : frame) snapMap.put(s.matchId, s);
+
+        for (Match m : tournament.getAllMatches()) {
+            MatchSnapshot s = snapMap.get(m.getMatchId());
+            if (s == null) continue;
+            tournament.revertMatch(m, s.winnerId, s.score);
+        }
+
+        updateBracketView();
+        updateProgress();
+    }
 
     @Override
     public void start(Stage primaryStage) {
@@ -78,118 +119,33 @@ public class app extends Application {
         primaryStage.show();
 
         updateBracketView();
-
         updateProgress();
     }
 
-    // =========================================================================
+    // ==========================================================
     // HEADER
-    // =========================================================================
+    // ==========================================================
 
     private HBox createHeaderBar() {
         HBox header = new HBox();
         header.setPadding(new Insets(15));
         header.setStyle("-fx-background-color: linear-gradient(to right, #040D43 0%, #040D43 50%, #FFBA09 100%); -fx-border-width: 1 0 0 0;");
+        Label title = new Label("🏆 INTRAMURAL BRACKET MAKER"); 
 
-        Label title = new Label("🏆 INTRAMURAL BRACKET MAKER");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 20));
         title.setTextFill(Color.web("#FFD862"));
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
+        
         header.getChildren().addAll(title, spacer);
         header.setAlignment(Pos.CENTER_LEFT);
         return header;
     }
 
-    // =========================================================================
+    // ===========================================================
     // PARTICIPANTS PANEL
-    // =========================================================================
-
-            private void updateParticipantsList() {
-            participantsList.getChildren().clear();
-            if (selectAllCheckBox != null) selectAllCheckBox.setSelected(false);
-            if (teams.length == 0) {
-            Label emptyLabel = new Label("There are no participants yet.\nClick 'ADD' to add participants.");
-            emptyLabel.setStyle("-fx-text-fill: #E0E6ED; -fx-font-size: 12px;");
-            participantsList.getChildren().add(emptyLabel);
-            return;
-        }
-        for (int idx = 0; idx < teams.length; idx++) {
-            final int i = idx;
-            Team team = teams[i];
-
-            Label handle = new Label("\u283f");
-            handle.setStyle("-fx-text-fill: #7F8EE3; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: open-hand;");
-            Tooltip handleTip = new Tooltip("Drag to reorder");
-            Tooltip.install(handle, handleTip);
-
-            CheckBox cb = new CheckBox(team.getName());
-            cb.setUserData(team);
-            cb.setStyle("-fx-font-size: 12px;");
-            HBox.setHgrow(cb, Priority.ALWAYS);
-
-            HBox row = new HBox(2, handle, cb);
-            row.setAlignment(Pos.CENTER_LEFT);
-            row.setPadding(new Insets(3, 4, 3, 4));
-            row.setStyle("-fx-background-color: transparent; -fx-background-radius: 4;");
-
-            String normalRowStyle = "-fx-background-color: transparent; -fx-background-radius: 4;";
-            String activeRowStyle = "-fx-background-color: #1e3060; -fx-background-radius: 4;";
-            String hoverRowStyle  = "-fx-background-color: #2a4080; -fx-background-radius: 4; -fx-border-color: #7F8EE3; -fx-border-width: 0 0 2 0;";
-            String handleNormal   = "-fx-text-fill: #7F8EE3; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: open-hand;";
-            String handleActive   = "-fx-text-fill: #FFD862; -fx-font-size: 14px; -fx-padding: 0 6 0 2; -fx-cursor: closed-hand;";
-
-            handle.setOnMousePressed(e -> {
-            dragSourceIndex = i;
-            handle.setStyle(handleActive);
-            row.setStyle(activeRowStyle);
-            e.consume();
-        });
-        handle.setOnMouseReleased(e -> {
-            // Reset visuals only — do NOT touch dragSourceIndex here
-            handle.setStyle(handleNormal);
-            row.setStyle(normalRowStyle);
-        });
-        handle.setOnDragDetected(e -> {
-            if (dragSourceIndex >= 0) {
-                handle.startFullDrag();
-            }
-            e.consume();
-        });
-            row.setOnMouseDragOver(e -> {
-                if (dragSourceIndex >= 0 && dragSourceIndex != i)
-                    row.setStyle(hoverRowStyle);
-                e.consume();
-            });
-            row.setOnMouseDragExited(e -> {
-                if (dragSourceIndex != i) row.setStyle(normalRowStyle);
-            });
-            row.setOnMouseDragReleased(e -> {
-                if (dragSourceIndex >= 0 && dragSourceIndex != i) {
-                    int src = dragSourceIndex;
-                    dragSourceIndex = -1;
-                    // Insert src before i (shift elements between)
-                    String srcName = teams[src].getName();
-                    List<String> names = new ArrayList<>();
-                    for (Team t : teams) names.add(t.getName());
-                    names.remove(src);
-                    names.add(i < src ? i : i - 1 + 1, srcName);
-                    // Rebuild teams array with new order
-                    teams = new Team[names.size()];
-                    for (int k = 0; k < names.size(); k++) teams[k] = new Team(k, names.get(k));
-                    rebuildTournament();
-                    updateParticipantsList();
-                    updateBracketView();
-                    updateProgress();
-                }
-                e.consume();
-            });
-
-            participantsList.getChildren().add(row);
-        }
-    }
+    // ===========================================================
 
     private VBox createParticipantsPanel() {
         VBox panel = new VBox(10);
@@ -200,67 +156,215 @@ public class app extends Application {
         title.setFont(Font.font("Arial", FontWeight.BOLD, 14));
         title.setTextFill(Color.web("#FFD862"));
 
-       participantsList = new VBox(5);
-       participantsList.setPadding(new Insets(5));
-       updateParticipantsList();
-
         selectAllCheckBox = new CheckBox("Select All");
-        CheckBox selectAllCb = selectAllCheckBox;
-        selectAllCb.setStyle("-fx-font-size: 11px; -fx-text-fill: #E0E6ED;");
-        selectAllCb.setOnAction(e -> {
-        boolean checked = selectAllCb.isSelected();
-        for (javafx.scene.Node node : participantsList.getChildren()) {
-            if (node instanceof HBox) {
-                for (javafx.scene.Node child : ((HBox) node).getChildren()) {
-                    if (child instanceof CheckBox) {
-                        ((CheckBox) child).setSelected(checked);
+        selectAllCheckBox.setStyle("-fx-font-size: 11px; -fx-text-fill: #E0E6ED;");
+        selectAllCheckBox.setOnAction(e -> {
+            boolean checked = selectAllCheckBox.isSelected();
+            for (javafx.scene.Node node : participantsList.getChildren()) {
+                if (node instanceof HBox) {
+                    for (javafx.scene.Node child : ((HBox) node).getChildren()) {
+                        if (child instanceof CheckBox) {
+                            ((CheckBox) child).setSelected(checked);
+                        }
+                    }
                 }
             }
+        });
+
+
+        participantsList = new VBox(3);
+        participantsList.setPadding(new Insets(4, 4, 4, 4));  // was (6,6,0,6) — add bottom padding back
+        participantsList.setStyle("-fx-background-color: #152055;");  // ADD this line
+
+        ScrollPane listScroll = new ScrollPane(participantsList);
+        listScroll.setFitToWidth(true);
+        listScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        listScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        listScroll.setStyle(
+        "-fx-background: #152055;" +
+        "-fx-background-color: #152055;" +
+        "-fx-border-color: transparent;");
+        listScroll.setBackground(javafx.scene.layout.Background.EMPTY);
+        listScroll.setFocusTraversable(false);
+        listScroll.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        listScroll.lookupAll(".scroll-bar").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        listScroll.lookupAll(".thumb").forEach(n ->
+            n.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+        listScroll.lookupAll(".track").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        listScroll.lookupAll(".increment-button, .decrement-button").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        listScroll.lookupAll(".increment-arrow, .decrement-arrow").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        // Kill the focus ring on the inner viewport node
+        javafx.scene.Node vp = listScroll.lookup(".viewport");
+        if (vp != null) {
+            vp.setStyle("-fx-background-color: #152055; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;");
+            vp.focusedProperty().addListener((fo, wf, nf) ->
+                vp.setStyle("-fx-background-color: #152055; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;"));
+            }
+        });
+    
+        VBox.setVgrow(listScroll, Priority.ALWAYS);
+
+    
+        Label inputPrompt = new Label("Enter participant name...");
+        inputPrompt.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 11px; -fx-font-style: italic;");
+        inputPrompt.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(inputPrompt, Priority.ALWAYS);
+
+        Label inputTyping = new Label();
+        inputTyping.setStyle("-fx-text-fill: #E0E6ED; -fx-font-size: 11px;");
+        inputTyping.setMaxWidth(Double.MAX_VALUE);
+        inputTyping.setVisible(false);
+        inputTyping.setManaged(false);
+
+    
+        Label cursor = new Label("|");
+        cursor.setStyle("-fx-text-fill: #FFBA09; -fx-font-size: 11px; -fx-font-weight: bold;");
+        cursor.setVisible(false);
+        cursor.setManaged(false);
+
+        HBox inputLine = new HBox(2, inputPrompt, inputTyping, cursor);
+        inputLine.setAlignment(Pos.CENTER_LEFT);
+        inputLine.setPadding(new Insets(6, 8, 6, 8));
+        inputLine.setStyle(
+            "-fx-background-color: #0d1a40;" +
+            "-fx-border-color: #7F8EE3;" +
+            "-fx-border-width: 1 0 0 0;" );
+        inputLine.setMaxWidth(Double.MAX_VALUE);
+
+    
+        TextField hiddenField = new TextField();
+        hiddenField.setMaxSize(0, 0);
+        hiddenField.setMinSize(0, 0);
+        hiddenField.setPrefSize(0, 0);
+        hiddenField.setOpacity(0);
+        hiddenField.setFocusTraversable(true);
+
+        VBox innerStack = new VBox(listScroll, inputLine);
+        innerStack.setPadding(new Insets(0));
+        VBox.setVgrow(listScroll, Priority.ALWAYS);
+
+        StackPane inputBox = new StackPane(innerStack, hiddenField);
+        inputBox.setAlignment(javafx.geometry.Pos.TOP_LEFT);
+        inputBox.setPrefHeight(380);
+        inputBox.setStyle(
+            "-fx-background-color: #152055;" +
+            "-fx-border-color: #7F8EE3;" +
+            "-fx-border-radius: 4;" +
+            "-fx-background-radius: 4;" +
+            "-fx-cursor: text;"      );
+        inputBox.setOnMouseClicked(e -> hiddenField.requestFocus());
+
+        hiddenField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+        if (isFocused) {
+            inputBox.setStyle(
+                "-fx-background-color: #152055;" +
+                "-fx-border-color: #7F8EE3;" +
+                "-fx-border-width: 2;" +
+                "-fx-border-radius: 4;" +
+                "-fx-background-radius: 4;" +
+                "-fx-cursor: text;"  );
+            
+            cursor.setVisible(true);
+            cursor.setManaged(true);
+        } else {
+            inputBox.setStyle(
+                "-fx-background-color: #152055;" +
+                "-fx-border-color: #7F8EE3;" +
+                "-fx-border-radius: 4;" +
+                "-fx-background-radius: 4;" +
+                "-fx-cursor: text;"
+            );
+            cursor.setVisible(false);
+            cursor.setManaged(false);
+            }
+        });
+
+   
+    final StringBuilder typingBuffer = new StringBuilder();
+    hiddenField.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+        if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
+            String name = typingBuffer.toString().trim();
+            if (!name.isEmpty()) {
+                if (teams.length >= 32) {
+                    showAlert("Team Limit Reached", "Maximum of 32 teams allowed.");
+                } else {
+                    Team[] newTeams = new Team[teams.length + 1];
+                    System.arraycopy(teams, 0, newTeams, 0, teams.length);
+                    newTeams[teams.length] = new Team(teams.length, name);
+                    teams = newTeams;
+                    typingBuffer.setLength(0);
+                    // Reset input line
+                    inputTyping.setText("");
+                    inputTyping.setVisible(false);
+                    inputTyping.setManaged(false);
+                    inputPrompt.setVisible(true);
+                    inputPrompt.setManaged(true);
+                    rebuildTournament();
+                    updateParticipantsList();
+                    updateBracketView();
+                    updateProgress();
+                }
+            }
+            e.consume();
+
+        } else if (e.getCode() == javafx.scene.input.KeyCode.BACK_SPACE) {
+            if (typingBuffer.length() > 0) {
+                typingBuffer.deleteCharAt(typingBuffer.length() - 1);
+                inputTyping.setText(typingBuffer.toString());
+                if (typingBuffer.length() == 0) {
+                    inputTyping.setVisible(false);
+                    inputTyping.setManaged(false);
+                    inputPrompt.setVisible(true);
+                    inputPrompt.setManaged(true);
+                }
+            }
+            e.consume();
         }
-    }
-});
+    });
 
-        ScrollPane scrollPane = new ScrollPane(participantsList);
-        scrollPane.setPannable(false);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setPrefHeight(400);
-        scrollPane.setStyle("-fx-background: #152055; -fx-border-color: #7F8EE3; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;");
-        scrollPane.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-        scrollPane.lookupAll(".scroll-bar").forEach(node ->
-            node.setStyle("-fx-background-color: transparent;"));
-        scrollPane.lookupAll(".thumb").forEach(node ->
-            node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
-        scrollPane.lookupAll(".track").forEach(node ->
-            node.setStyle("-fx-background-color: transparent;"));
-        scrollPane.lookupAll(".increment-button, .decrement-button").forEach(node ->
-            node.setStyle("-fx-background-color: transparent;"));
-        scrollPane.lookupAll(".increment-arrow, .decrement-arrow").forEach(node ->
-            node.setStyle("-fx-background-color: transparent;"));
-});
+    hiddenField.addEventFilter(javafx.scene.input.KeyEvent.KEY_TYPED, e -> {
+        String ch = e.getCharacter();
+        if (ch == null || ch.isEmpty() || ch.charAt(0) < 32) return;
+        if (typingBuffer.length() < 45) {
+            typingBuffer.append(ch);
+            inputTyping.setText(typingBuffer.toString());
+            inputTyping.setVisible(true);
+            inputTyping.setManaged(true);
+            inputPrompt.setVisible(false);
+            inputPrompt.setManaged(false);
+         }
+        e.consume();
+    });
 
-        Button addTeamBtn    = createStyledButton("ADD",     "#7F8EE3");
-        Button removeTeamBtn = createStyledButton("REMOVE",  "#e74c3c");
+    Button removeTeamBtn = createStyledButton("REMOVE",  "#e74c3c");
         Button shuffleBtn    = createStyledButton("SHUFFLE", "#7F8EE3");
+        Button undoBtn       = createStyledButton("UNDO",    "#7F8EE3");
 
-        String addNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
-        String addHover  = "-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String remNormal = "-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String remHover  = "-fx-background-color: #c0392b; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String shuNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
         String shuHover  = "-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
+        String undNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
+        String undHover  = "-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
 
-        addTeamBtn.setStyle(addNormal);
         removeTeamBtn.setStyle(remNormal);
         shuffleBtn.setStyle(shuNormal);
-        addTeamBtn.setOnMouseEntered(e -> addTeamBtn.setStyle(addHover));
-        addTeamBtn.setOnMouseExited(e  -> addTeamBtn.setStyle(addNormal));
+        undoBtn.setStyle(undNormal);
+
         removeTeamBtn.setOnMouseEntered(e -> removeTeamBtn.setStyle(remHover));
         removeTeamBtn.setOnMouseExited(e  -> removeTeamBtn.setStyle(remNormal));
         shuffleBtn.setOnMouseEntered(e -> shuffleBtn.setStyle(shuHover));
         shuffleBtn.setOnMouseExited(e  -> shuffleBtn.setStyle(shuNormal));
-        addTeamBtn.setOnAction(e    -> addTeam());
+        undoBtn.setOnMouseEntered(e -> undoBtn.setStyle(undHover));
+        undoBtn.setOnMouseExited(e  -> undoBtn.setStyle(undNormal));
+
         removeTeamBtn.setOnAction(e -> removeSelectedTeams());
         shuffleBtn.setOnAction(e    -> shuffleTeams());
+        undoBtn.setOnAction(e       -> performUndo());
 
         Button simulateBtn = createStyledButton("SIMULATE", "#FFBA09");
         String simNormal = "-fx-background-color: #FFBA09; -fx-text-fill: #040D43; -fx-padding: 8 16; -fx-background-radius: 3; -fx-border-radius: 3; -fx-border-color: transparent; -fx-font-weight: bold;";
@@ -270,56 +374,171 @@ public class app extends Application {
         simulateBtn.setOnMouseExited(e  -> simulateBtn.setStyle(simNormal));
         simulateBtn.setOnAction(e -> simulateBracket());
 
-        addTeamBtn.setPrefWidth(100);
-        removeTeamBtn.setPrefWidth(100);
+        removeTeamBtn.setPrefWidth(200);
         shuffleBtn.setPrefWidth(200);
+        undoBtn.setPrefWidth(200);
         simulateBtn.setPrefWidth(200);
-        HBox buttonBox = new HBox(10, addTeamBtn, removeTeamBtn);
-        buttonBox.setAlignment(Pos.CENTER);
-        HBox shuffleBox = new HBox(shuffleBtn);
-        shuffleBox.setAlignment(Pos.CENTER);
-        HBox simulateBox = new HBox(simulateBtn);
-        simulateBox.setAlignment(Pos.CENTER);
-        
-        Label tip = new Label("Quick Tip: You can mass remove participants by checking the box above");
+
+        HBox removeBox  = new HBox(removeTeamBtn);  removeBox.setAlignment(Pos.CENTER);
+        HBox shuffleBox = new HBox(shuffleBtn);      shuffleBox.setAlignment(Pos.CENTER);
+        HBox undoBox    = new HBox(undoBtn);         undoBox.setAlignment(Pos.CENTER);
+        HBox simBox     = new HBox(simulateBtn);     simBox.setAlignment(Pos.CENTER);
+
+        Label tip = new Label("Quick Tip: You can hold and drag participants to reorder them.");
         tip.setFont(Font.font("Arial", 10));
         tip.setTextFill(Color.web("#E0E6ED"));
         tip.setWrapText(true);
 
-        panel.getChildren().addAll(title, selectAllCb, scrollPane, buttonBox, shuffleBox, simulateBox, tip);
+        panel.getChildren().addAll(title, selectAllCheckBox, inputBox, removeBox, shuffleBox, undoBox, simBox, tip);
         return panel;
     }
 
-    private void simulateBracket() {
-    if (tournament == null) {
-        showAlert("No Bracket", "Please set up a valid bracket first.");
-        return;
-    }
-    java.util.Random rng = new java.util.Random();
-    List<Match> pending = new ArrayList<>();
-    for (Match m : tournament.getAllMatches()) {
-        if (!m.isCompleted() && m.getTeam1() != null && m.getTeam2() != null
-                && !m.getTeam1().getName().equals("TBD")
-                && !m.getTeam2().getName().equals("TBD")) {
-            pending.add(m);
+    // ── Drop-in replacement for updateParticipantsList() ─────────────────
+    private void updateParticipantsList() {
+        participantsList.getChildren().clear();
+        if (selectAllCheckBox != null) selectAllCheckBox.setSelected(false);
+        if (teams.length == 0) return;
+
+        for (int idx = 0; idx < teams.length; idx++) {
+        final int i = idx;
+        Team team = teams[i];
+
+        Label numLabel = new Label((i + 1) + ".");
+        numLabel.setStyle("-fx-text-fill: #FFBA09; -fx-font-size: 11px;");
+        numLabel.setMinWidth(16);
+        numLabel.setPrefWidth(16);
+        numLabel.setAlignment(Pos.CENTER_LEFT);
+
+        Label nameLabel = new Label(team.getName());
+        nameLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: #E0E6ED;");
+        nameLabel.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(nameLabel, Priority.ALWAYS);
+
+        CheckBox cb = new CheckBox();
+        cb.setUserData(team);
+        cb.setMinWidth(16);
+        cb.setPrefWidth(16);
+        cb.setMaxWidth(16);
+
+        HBox row = new HBox(2);
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.setPadding(new Insets(3, 8, 3, 4));
+        row.setMaxWidth(Double.MAX_VALUE);
+        row.setStyle("-fx-background-color: transparent; -fx-background-radius: 4; -fx-cursor: grab;");
+        row.getChildren().addAll(numLabel, nameLabel, cb);  
+
+        row.setOnMouseEntered(e -> {
+            if (dragSourceIndex == -1)
+                row.setStyle("-fx-background-color: #1e3060; -fx-background-radius: 4; -fx-cursor: grab;");
+        });
+        row.setOnMouseExited(e -> {
+            if (dragSourceIndex == -1)
+                row.setStyle("-fx-background-color: transparent; -fx-background-radius: 4; -fx-cursor: grab;");
+        });
+
+        row.setOnMousePressed(e -> {
+            dragSourceIndex = i;
+            row.setStyle("-fx-background-color: #1a2a5a ; -fx-background-radius: 4; -fx-border-color: #7F8EE3 ; -fx-border-radius: 4; -fx-cursor: grabbing;");
+            e.consume();
+            
+        });
+
+        row.setOnMouseDragged(e -> {
+            double localY = participantsList.sceneToLocal(e.getSceneX(), e.getSceneY()).getY();
+            int targetIdx = -1;
+            double accY = 0;
+            for (int k = 0; k < participantsList.getChildren().size(); k++) {
+                javafx.scene.Node node = participantsList.getChildren().get(k);
+                double nodeH = node.getBoundsInLocal().getHeight() + 3;
+                if (localY >= accY && localY <= accY + nodeH) {
+                    targetIdx = k;
+                    break;
+                }
+                accY += nodeH;
+            }
+            for (int k = 0; k < participantsList.getChildren().size(); k++) {
+                javafx.scene.Node node = participantsList.getChildren().get(k);
+                if (node instanceof HBox) {
+                    if (k == targetIdx && k != dragSourceIndex) {
+                        ((HBox) node).setStyle(
+                            "-fx-background-color: #cad4e4;" +
+                            "-fx-background-radius: 4;" +
+                            "-fx-border-color: #FFBA09;" +
+                            "-fx-border-width: 0 0 2 0;");
+                    } else if (k != dragSourceIndex) {
+                        ((HBox) node).setStyle(
+                            "-fx-background-color: transparent;" +
+                            "-fx-background-radius: 4;");
+                    }
+                }
+            }
+            e.consume();
+        });
+
+        row.setOnMouseReleased(e -> {
+            double localY = participantsList.sceneToLocal(e.getSceneX(), e.getSceneY()).getY();
+            int targetIdx = dragSourceIndex;
+            double accY = 0;
+            for (int k = 0; k < participantsList.getChildren().size(); k++) {
+                javafx.scene.Node node = participantsList.getChildren().get(k);
+                double nodeH = node.getBoundsInLocal().getHeight() + 3;
+                if (localY >= accY && localY <= accY + nodeH) {
+                    targetIdx = k;
+                    break;
+                }
+                accY += nodeH;
+            }
+            if (targetIdx != dragSourceIndex && targetIdx >= 0 && targetIdx < teams.length) {
+                Team temp = teams[dragSourceIndex];
+                teams[dragSourceIndex] = teams[targetIdx];
+                teams[targetIdx] = temp;
+                for (int k = 0; k < teams.length; k++)
+                    teams[k] = new Team(k, teams[k].getName());
+                rebuildTournament();
+                updateParticipantsList();
+                updateBracketView();
+                updateProgress();
+            } else {
+                updateParticipantsList();
+            }
+            dragSourceIndex = -1;
+            e.consume();
+        });
+
+        participantsList.getChildren().add(row);
         }
     }
-    if (pending.isEmpty()) {
-        showAlert("Simulate", "No pending matches to simulate.");
-        return;
+
+    private void simulateBracket() {
+        if (tournament == null) {
+            showAlert("No Bracket", "Please set up a valid bracket first.");
+            return;
+        }
+        java.util.Random rng = new java.util.Random();
+        List<Match> pending = new ArrayList<>();
+        for (Match m : tournament.getAllMatches()) {
+            if (!m.isCompleted() && m.getTeam1() != null && m.getTeam2() != null
+                    && !m.getTeam1().getName().equals("TBD")
+                    && !m.getTeam2().getName().equals("TBD")) {
+                pending.add(m);
+            }
+        }
+        if (pending.isEmpty()) {
+            showAlert("Simulate", "No pending matches to simulate.");
+            return;
+        }
+        for (Match m : pending) {
+            int s1, s2;
+            do {
+                s1 = rng.nextInt(21);
+                s2 = rng.nextInt(21);
+            } while (s1 == s2);
+            Team winner = s1 > s2 ? m.getTeam1() : m.getTeam2();
+            tournament.recordWinner(m, winner, s1, s2);
+        }
+        updateBracketView();
+        updateProgress();
     }
-    for (Match m : pending) {
-        int s1, s2;
-        do {
-            s1 = rng.nextInt(21);
-            s2 = rng.nextInt(21);
-        } while (s1 == s2);
-        Team winner = s1 > s2 ? m.getTeam1() : m.getTeam2();
-        tournament.recordWinner(m, winner, s1, s2);
-    }
-    updateBracketView();
-    updateProgress();
-}
 
     private VBox createBracketViewPanel() {
         VBox panel = new VBox(10);
@@ -332,7 +551,7 @@ public class app extends Application {
 
         bracketView = new VBox(0);
         bracketView.setPadding(new Insets(0));
-        bracketView.setStyle("-fx-background-color: #040D43; -fx-border-color: #7F8EE3; -fx-border-width: 2; -fx-border-radius: 5; -fx-background-radius: 5;");
+        bracketView.setFocusTraversable(false);
 
         panel.getChildren().addAll(title, bracketView);
         VBox.setVgrow(bracketView, Priority.ALWAYS);
@@ -344,7 +563,6 @@ public class app extends Application {
     // =========================================================================
 
     private String resolveActualType(String selectedType, int teamCount) {
-        // 12-team SE and DE are handled by their own dedicated builders
         if ("Single Elimination".equals(selectedType) && teamCount == 12) {
             return "Single Elimination";
         }
@@ -357,7 +575,6 @@ public class app extends Application {
         return selectedType;
     }
 
-    /** Returns true when the team count is valid for the selected bracket type. */
     private boolean isValidTeamCount(int n, String bracketType) {
         if (n == 0) return false;
         switch (bracketType) {
@@ -365,44 +582,27 @@ public class app extends Application {
                 return n == 4 || n == 8 || n == 12 || n == 16 || n == 24 || n == 32;
             case "Double Elimination":
                 return (isPowerOfTwo(n) && n >= 4 && n <= 32) || n == 24 || n == 12;
-            // ── FIX: Round Robin, Swiss, Free For All only require 3+ teams ──
+            case "Round Robin":
+                return n >= 3;
+            // Free For All requires at least 4 teams
+            case "Free For All":
+                return n >= 4;
+            // Swiss: 3+
             default:
                 return n >= 3;
         }
     }
 
-    private void rebuildTournament() {
+     private void rebuildTournament() {
+        undoStack.clear();
+        for (int i = 0; i < teams.length; i++)
+            teams[i] = new Team(teams[i].getId(), teams[i].getName());
         String btype = bracketTypeCombo.getValue();
         if (isValidTeamCount(teams.length, btype)) {
             tournament = new TournamentBracket(teams, resolveActualType(btype, teams.length));
         } else {
             tournament = null;
         }
-    }
-
-    private void addTeam() {
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("Add Team");
-        dialog.setHeaderText("Enter team name:");
-        dialog.setContentText("Team name:");
-
-        dialog.showAndWait().ifPresent(name -> {
-            if (!name.trim().isEmpty()) {
-                if (teams.length >= 32) {
-                    showAlert("Team Limit Reached", "Maximum of 32 teams allowed.");
-                    return;
-                }
-                Team[] newTeams = new Team[teams.length + 1];
-                System.arraycopy(teams, 0, newTeams, 0, teams.length);
-                newTeams[teams.length] = new Team(teams.length, name.trim());
-                teams = newTeams;
-
-                rebuildTournament();
-                updateBracketView();
-                updateParticipantsList();
-                updateProgress();
-            }
-        });
     }
 
     private void removeSelectedTeams() {
@@ -564,14 +764,16 @@ public class app extends Application {
         descriptionArea.setPrefHeight(80);
         descriptionArea.setWrapText(true);
         descriptionArea.setStyle(
-            "-fx-control-inner-background: #152055; -fx-background-color: transparent;" +
-            "-fx-border-color: #7F8EE3; -fx-border-radius: 3;" +
-            "-fx-prompt-text-fill: #e0e6edc2; -fx-text-fill: #FFFFFF;");
+        "-fx-control-inner-background: #152055; -fx-background-color: transparent;" +
+        "-fx-border-color: #7F8EE3; -fx-border-radius: 3;" +
+        "-fx-prompt-text-fill: #e0e6edc2; -fx-text-fill: #FFFFFF;");
         descriptionArea.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-            ScrollPane sp = (ScrollPane) descriptionArea.lookup(".scroll-pane");
-            if (sp != null) {
-                sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-                sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+           
+           
+        ScrollPane sp = (ScrollPane) descriptionArea.lookup(".scroll-pane");
+        if (sp != null) {
+        sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+       sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
             }
         });
         descriptionArea.textProperty().addListener((obs, oldText, newText) -> {
@@ -631,7 +833,7 @@ public class app extends Application {
         saveBracketBtn.setOnAction(e -> saveBracket());
         exitBtn.setOnAction(e       -> System.exit(0));
 
-        Label tip = new Label("To save your bracket, click the 'Save Bracket' button.");
+        Label tip = new Label("Quick Tip: You can save and load your brackets.");
         tip.setFont(Font.font("Arial", 10));
         tip.setTextFill(Color.web("#E0E6ED"));
         tip.setWrapText(true);
@@ -687,7 +889,7 @@ public class app extends Application {
     // =========================================================================
 
     private String getNotReadyMessage(int n, String type) {
-        if (n == 0) return "Single Elimination (4, 8, 12, 16, 24, 32) \nDouble Elimination (4, 8, 12, 16, 24, 32) \nRound Robin, Swiss System, and Free For All require at least 3 teams.";
+        if (n == 0) return "Single Elimination (4, 8, 12, 16, 24, 32) \nDouble Elimination (4, 8, 12, 16, 24, 32) \nRound Robin, Swiss System, and Free For All require at least 4 teams.";
         if ("Single Elimination".equals(type)) {
             if (n < 4) return "Need at least 4 Participants for Single Elimination.";
             int[] valid = {4, 8, 12, 16, 24, 32};
@@ -704,56 +906,70 @@ public class app extends Application {
             for (int v : valid) if (v > n) return "Add " + (v - n) + " more team(s) for " + v + "-team Double Elimination.\n(Valid: 4, 8, 12, 16, 24, 32)";
             return "Double Elimination supports 4, 8, 12, 16, 24, or 32 teams.\nCurrent: " + n;
         }
-        // Round Robin, Swiss, Free For All: only 3+ required
-        if (n < 3) return "Need at least 3 teams for " + type + ".";
+        // Round Robin, Swiss: 4+; Free For All: 4+
+        if ("Free For All".equals(type)) {
+            if (n < 4) return "Need at least 4 teams for Free For All.";
+            return "";
+        }
+        if (n < 4) return "Need at least 4 teams for " + type + ".";
         return "";
     }
 
     private void updateBracketView() {
-        bracketView.getChildren().clear();
-        String currentType = bracketTypeCombo.getValue();
+    bracketView.getChildren().clear();
+    bracketView.setStyle(
+        "-fx-background-color: #040D43;" +
+        "-fx-border-color: #7F8EE3;" +
+        "-fx-border-width: 1;" +
+        "-fx-border-radius: 5;" +
+        "-fx-background-radius: 5;" +
+        "-fx-focus-color: transparent;" +
+        "-fx-faint-focus-color: transparent;"
+    );
 
-        if (tournament == null || !isValidTeamCount(teams.length, currentType)) {
+    String currentType = bracketTypeCombo.getValue();  // ← must be declared BEFORE use
+
+    if (tournament == null || !isValidTeamCount(teams.length, currentType)) {
         String fullMsg = getNotReadyMessage(teams.length, currentType);
         if (teams.length == 0 || fullMsg.startsWith("Supported")) {
-        Label title = new Label("SUPPORTED FORMATS:");
-        title.setFont(Font.font("Arial", FontWeight.BOLD, 13));
-        title.setTextFill(Color.web("#FFD862"));
-        title.setPadding(new Insets(10, 10, 0, 10));
-        Label msg = new Label(fullMsg.replace("Supported Formats:\n \n", ""));
-        msg.setFont(Font.font("Arial", 13));
-        msg.setTextFill(Color.web("#E0E6ED"));
-        msg.setWrapText(true);
-        msg.setPadding(new Insets(5, 10, 10, 10));
-        bracketView.getChildren().addAll(title, msg);
-    } else {
-        Label msg = new Label(fullMsg);
-        msg.setFont(Font.font("Arial", 13));
-        msg.setTextFill(Color.web("#E0E6ED"));
-        msg.setWrapText(true);
-        msg.setPadding(new Insets(10));
-        bracketView.getChildren().add(msg);
-    }
-    return;
-}
-
-        switch (currentType) {
-            case "Single Elimination":
-                if (teams.length == 12) displaySingleElimination12();
-                else displaySingleElimination();
-                break;
-            case "Double Elimination":
-                if (teams.length == 12) displayDoubleElimination12();
-                else if (teams.length == 6 || teams.length == 10
-                        || teams.length == 20) displayPlayInDE();
-                else displayDoubleElimination();
-                break;
-            case "Round Robin":  displayRoundRobin();  break;
-            case "Swiss System": displaySwissSystem();  break;
-            case "Free For All": displayFreeForAll();   break;
-            default:             displaySingleElimination();
+            Label title = new Label("SUPPORTED FORMATS:");
+            title.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+            title.setTextFill(Color.web("#FFD862"));
+            title.setPadding(new Insets(10, 10, 0, 10));
+            Label msg = new Label(fullMsg.replace("Supported Formats:\n \n", ""));
+            msg.setFont(Font.font("Arial", 13));
+            msg.setTextFill(Color.web("#E0E6ED"));
+            msg.setWrapText(true);
+            msg.setPadding(new Insets(5, 10, 10, 10));
+            bracketView.getChildren().addAll(title, msg);
+        } else {
+            Label msg = new Label(fullMsg);
+            msg.setFont(Font.font("Arial", 13));
+            msg.setTextFill(Color.web("#E0E6ED"));
+            msg.setWrapText(true);
+            msg.setPadding(new Insets(10));
+            bracketView.getChildren().add(msg);
         }
+        return;
     }
+
+    switch (currentType) {
+        case "Single Elimination":
+            if (teams.length == 12) displaySingleElimination12();
+            else displaySingleElimination();
+            break;
+        case "Double Elimination":
+            if (teams.length == 12) displayDoubleElimination12();
+            else if (teams.length == 6 || teams.length == 10
+                    || teams.length == 20) displayPlayInDE();
+            else displayDoubleElimination();
+            break;
+        case "Round Robin":  displayRoundRobin();  break;
+        case "Swiss System": displaySwissSystem();  break;
+        case "Free For All": displayFreeForAll();   break;
+        default:             displaySingleElimination();
+    }
+}
 
     // =========================================================================
     // SINGLE ELIMINATION
@@ -1281,43 +1497,33 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         }
         List<Integer> lRounds = new ArrayList<>(losersByRound.keySet());
         Collections.sort(lRounds);
-        Map<Integer, Integer> lRoundToCol = new HashMap<>();
-        for (int i = 0; i < lRounds.size(); i++) lRoundToCol.put(lRounds.get(i), i);
         int lCols = lRounds.size();
 
         Match grandFinal = tournament.getGrandFinals();
 
         double colStride = CARD_W + COL_GAP;
-        // WB columns: left-to-right starting at x=20
         double[] wColX = new double[Math.max(wCols, 1)];
         for (int c = 0; c < wCols; c++) wColX[c] = 20 + c * colStride;
-        // LB columns: also start at x=20 (drawn below WB, not beside it)
         double[] lColX = new double[Math.max(lCols, 1)];
         for (int c = 0; c < lCols; c++) lColX[c] = 20 + c * colStride;
 
-        // Y layout: same logic as SE — anchor R1 evenly, later rounds by positional midpoint.
-        // Handles both 1:1 rounds (same count) and 2:1 rounds (halving count).
         Map<Match, Double> matchY = new HashMap<>();
         double slotH = CARD_H + MATCH_V_GAP;
 
-        // Anchor col-0: assign Y consecutively
         List<Match> r1Anchor = (!wRoundKeys.isEmpty()) ? visWbByRound.get(wRoundKeys.get(0)) : new ArrayList<>();
         if (is24 && winnersByRound.containsKey(1)) r1Anchor = winnersByRound.get(1);
         if (r1Anchor != null)
             for (int i = 0; i < r1Anchor.size(); i++)
                 matchY.put(r1Anchor.get(i), W_TOP_PAD + i * slotH);
 
-        // Later WB rounds: if same count as prev → same Y (1:1); if half count → midpoint of pair (2:1)
         for (int ri = 1; ri < wRoundKeys.size(); ri++) {
             List<Match> prev = visWbByRound.get(wRoundKeys.get(ri - 1));
             List<Match> curr = visWbByRound.get(wRoundKeys.get(ri));
             if (prev == null || curr == null) continue;
             for (int i = 0; i < curr.size(); i++) {
                 if (curr.size() == prev.size()) {
-                    // 1:1: each match feeds straight across
                     if (matchY.containsKey(prev.get(i))) matchY.put(curr.get(i), matchY.get(prev.get(i)));
                 } else {
-                    // 2:1: midpoint of pair
                     int p1 = i * 2, p2 = i * 2 + 1;
                     Double y1 = (p1 < prev.size() && matchY.containsKey(prev.get(p1))) ? matchY.get(prev.get(p1)) : null;
                     Double y2 = (p2 < prev.size() && matchY.containsKey(prev.get(p2))) ? matchY.get(prev.get(p2)) : null;
@@ -1755,9 +1961,7 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
                 rl.setLayoutX(colX[col]); rl.setLayoutY(topY - 18);
                 pane.getChildren().add(rl);
             }
-        }
-
-        addScrollPane(pane, 600);
+        }   
         if (hasPiWb) {
             for (Map.Entry<Integer, List<Match>> e : piWbByRound.entrySet()) {
                 int r = e.getKey();
@@ -1770,7 +1974,6 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
                 }
             }
         }
-        // Play-in LB cards
         if (hasPiLb) {
             for (int r : piLbRounds) {
                 int col = piLbRoundToCol.get(r);
@@ -1796,10 +1999,9 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     }
 
  
-    // =========================================================================
+   
     private VBox createDeMatchCard(Match match, boolean isWinners, boolean isGrandFinal) {
-        String border  = isGrandFinal ? "#FFBA09" : (isWinners ? "#FFBA09" : "#FFBA09");
-
+        String border = "#FFBA09";
         String t1Name = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
         String t2Name = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
         boolean done  = match.isCompleted();
@@ -1807,18 +2009,22 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         String score  = match.getScore() != null ? match.getScore() : "";
 
         boolean canReport = !done && match.getTeam1() != null && match.getTeam2() != null
-                            && !t1Name.equals("TBD") && !t2Name.equals("TBD");
+        && !t1Name.equals("TBD") && !t2Name.equals("TBD");
 
-        String normalStyle = "-fx-background-color:#152055;-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;" + (canReport ? "-fx-cursor:hand;" : "");
-        String hoverStyle  = "-fx-background-color:#152055;-fx-border-color:#FFBA09;-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-cursor:hand;";
+        String normalStyle  = "-fx-background-color:#152055;-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-focus-color:transparent;-fx-faint-focus-color:transparent;" + (canReport ? "-fx-cursor:hand;" : "");
+        String hoverStyle   = "-fx-background-color:#1a2a6a;-fx-border-color:#FFBA09;-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-focus-color:transparent;-fx-faint-focus-color:transparent;-fx-cursor:hand;";
+        String pressedStyle = "-fx-background-color:#152055;-fx-border-color:#FFBA09;-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-focus-color:transparent;-fx-faint-focus-color:transparent;-fx-cursor:hand;";
 
         VBox card = new VBox(2);
         card.setAlignment(Pos.CENTER_LEFT);
         card.setPadding(new Insets(4, 8, 4, 8));
+        card.setFocusTraversable(false);
         card.setStyle(normalStyle);
         if (canReport) {
             card.setOnMouseEntered(e -> card.setStyle(hoverStyle));
             card.setOnMouseExited(e  -> card.setStyle(normalStyle));
+            card.setOnMousePressed(e -> card.setStyle(pressedStyle));
+            card.setOnMouseReleased(e -> card.setStyle(hoverStyle));
             card.setOnMouseClicked(e -> showScoreDialog(match));
         }
 
@@ -1890,7 +2096,7 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         container.getChildren().add(title);
 
         // ── Standings table ───────────────────────────────────────────────
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","PD","Win %"}, "#040D43");
+        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Win %","PD"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
         sorted.sort((a, b) -> {
             int w = Integer.compare(b.getWins(), a.getWins());
@@ -1901,8 +2107,8 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
             addStandingsRow(grid, i + 1, new String[]{
                 String.valueOf(i + 1), t.getName(),
                 String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
-                String.valueOf(t.getPointDifference()),
-                String.format("%.1f%%", t.getWinPercentage())
+                String.format("%.1f%%", t.getWinPercentage()),
+                String.valueOf(t.getPointDifference())
             });
         }
         container.getChildren().add(grid);
@@ -1910,36 +2116,36 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         // ── Matches grouped by round ──────────────────────────────────────
         int totalRounds = tournament.getTotalRounds();
         for (int r = 1; r <= totalRounds; r++) {
-            List<Match> roundMatches = tournament.getMatchesByRound(r);
-            if (roundMatches.isEmpty()) continue;
+        List<Match> roundMatches = tournament.getMatchesByRound(r);
+        if (roundMatches.isEmpty()) continue;
 
-            Label roundLbl = new Label("Round " + r);
-            roundLbl.setFont(Font.font("Arial", FontWeight.BOLD, 13));
-            roundLbl.setTextFill(Color.web("#FFBA09"));
-            roundLbl.setPadding(new Insets(8, 0, 2, 0));
-            container.getChildren().add(roundLbl);
+        Label roundLbl = new Label("Round " + r);
+        roundLbl.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+        roundLbl.setTextFill(Color.web("#FFBA09"));
+        roundLbl.setPadding(new Insets(8, 0, 2, 0));
+        container.getChildren().add(roundLbl);
 
-            for (Match m : roundMatches) {
-                container.getChildren().add(createMatchResultRow(m));
-            }
+        for (int i = 0; i < roundMatches.size(); i += 2) {
+        HBox pair = new HBox(8);
+        pair.setFillHeight(true);
+
+        HBox left = createMatchResultRow(roundMatches.get(i));
+        HBox.setHgrow(left, Priority.ALWAYS);
+        left.setMaxWidth(Double.MAX_VALUE);
+        pair.getChildren().add(left);
+
+        if (i + 1 < roundMatches.size()) {
+            HBox right = createMatchResultRow(roundMatches.get(i + 1));
+            HBox.setHgrow(right, Priority.ALWAYS);
+            right.setMaxWidth(Double.MAX_VALUE);
+            pair.getChildren().add(right);
         }
 
-        ScrollPane sp = new ScrollPane(container);
-        sp.setFitToWidth(true);
-        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
-        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
-            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-        });
-        bracketView.getChildren().add(sp);
-        VBox.setVgrow(sp, Priority.ALWAYS);
-
-        Team champion = tournament.getTournamentWinner();
-        if (champion != null) addChampionDisplay(champion);
+        container.getChildren().add(pair);
     }
+}
+     addScrollPane(container, 550, true);
+}
 
     private void displaySwissSystem() {
         VBox container = new VBox(15);
@@ -1950,15 +2156,18 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Points","Opp Score"}, "#040D43");
+        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Opp Score","Points"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
-        sorted.sort((a, b) -> Integer.compare(b.getWins(), a.getWins()));
+        sorted.sort((a, b) -> {
+            int w = Integer.compare(b.getWins(), a.getWins());
+            return w != 0 ? w : Integer.compare(b.getPointsAllowed(), a.getPointsAllowed());
+        });
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
             addStandingsRow(grid, i + 1, new String[]{
                 String.valueOf(i + 1), t.getName(),
                 String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
-                String.valueOf(t.getPointsScored()), String.valueOf(t.getPointsAllowed())
+                String.valueOf(t.getPointsAllowed()), String.valueOf(t.getPointsScored())
             });
         }
         container.getChildren().add(grid);
@@ -1970,43 +2179,51 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         container.getChildren().add(pLabel);
         List<Match> pending = tournament.getPendingMatches();
         if (pending.isEmpty()) {
-            Label done = new Label("All rounds complete!");
-            done.setFont(Font.font("Arial", 12));
-            done.setTextFill(Color.web("#7F8EE3"));
-            container.getChildren().add(done);
+        Label done = new Label("All rounds complete!");
+        done.setFont(Font.font("Arial", 12));
+        done.setTextFill(Color.web("#7F8EE3"));
+        container.getChildren().add(done);
         } else {
-            for (Match m : pending) {
-                container.getChildren().add(createMatchResultRow(m));
-            }
+        for (int i = 0; i < pending.size(); i += 2) {
+        HBox pair = new HBox(8);
+        pair.setFillHeight(true);
+
+        HBox left = createMatchResultRow(pending.get(i));
+        HBox.setHgrow(left, Priority.ALWAYS);
+        left.setMaxWidth(Double.MAX_VALUE);
+        pair.getChildren().add(left);
+
+        if (i + 1 < pending.size()) {
+            HBox right = createMatchResultRow(pending.get(i + 1));
+            HBox.setHgrow(right, Priority.ALWAYS);
+            right.setMaxWidth(Double.MAX_VALUE);
+            pair.getChildren().add(right);
         }
-        ScrollPane sp = new ScrollPane(container);
-        sp.setFitToWidth(true);
-        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
-        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
-            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-        });
-        bracketView.getChildren().add(sp);
-        VBox.setVgrow(sp, Priority.ALWAYS);
-        Team champion = tournament.getTournamentWinner();
-        if (champion != null) addChampionDisplay(champion);
+
+        container.getChildren().add(pair);
+        }
     }
+        addScrollPane(container, 550, true);
+}
 
     private void displayFreeForAll() {
         VBox container = new VBox(15);
         container.setPadding(new Insets(20));
         container.setStyle("-fx-background-color: #040D43;");
+
         Label title = new Label("FREE FOR ALL - Leaderboard");
         title.setFont(Font.font("Arial", FontWeight.BOLD, 16));
         title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
+        // Standings grid
         GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Pts Scored","Pts Allowed"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
-        sorted.sort((a, b) -> Integer.compare(b.getWins(), a.getWins()));
+        sorted.sort((a, b) -> {
+            int wDiff = Integer.compare(b.getWins(), a.getWins());
+            if (wDiff != 0) return wDiff;
+            return Integer.compare(b.getPointsScored(), a.getPointsScored());
+        });
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
             addStandingsRow(grid, i + 1, new String[]{
@@ -2017,30 +2234,49 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         }
         container.getChildren().add(grid);
 
-        Label matchesLbl = new Label("ALL MATCHES");
-        matchesLbl.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        matchesLbl.setTextFill(Color.web("#FFBA09"));
-        matchesLbl.setPadding(new Insets(8, 0, 2, 0));
-        container.getChildren().add(matchesLbl);
-        for (Match m : tournament.getAllMatches()) {
-            container.getChildren().add(createMatchResultRow(m));
+        // Progress summary
+        int totalM = tournament.getAllMatches().size(), doneM = 0;
+        for (Match m : tournament.getAllMatches()) if (m.isCompleted()) doneM++;
+        Label progLbl = new Label("Matches: " + doneM + " / " + totalM + " completed");
+        progLbl.setFont(Font.font("Arial", 12));
+        progLbl.setTextFill(Color.web("#7F8EE3"));
+        progLbl.setPadding(new Insets(0, 0, 4, 0));
+        container.getChildren().add(progLbl);
+
+        // Matches grouped by round
+        int totalRounds = tournament.getTotalRounds();
+        for (int r = 1; r <= totalRounds; r++) {
+        List<Match> roundMatches = tournament.getMatchesByRound(r);
+        if (roundMatches.isEmpty()) continue;
+
+        Label roundLbl = new Label("Round " + r);
+        roundLbl.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+        roundLbl.setTextFill(Color.web("#FFBA09"));
+        roundLbl.setPadding(new Insets(8, 0, 2, 0));
+        container.getChildren().add(roundLbl);
+
+        for (int i = 0; i < roundMatches.size(); i += 2) {
+        HBox pair = new HBox(8);
+        pair.setFillHeight(true);
+
+        HBox left = createMatchResultRow(roundMatches.get(i));
+        HBox.setHgrow(left, Priority.ALWAYS);
+        left.setMaxWidth(Double.MAX_VALUE);
+        pair.getChildren().add(left);
+
+        if (i + 1 < roundMatches.size()) {
+            HBox right = createMatchResultRow(roundMatches.get(i + 1));
+            HBox.setHgrow(right, Priority.ALWAYS);
+            right.setMaxWidth(Double.MAX_VALUE);
+            pair.getChildren().add(right);
         }
 
-        ScrollPane sp = new ScrollPane(container);
-        sp.setFitToWidth(true);
-        sp.setStyle("-fx-background: #040D43; -fx-background-color: #040D43; -fx-border-color: transparent;");
-        sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
-            sp.lookupAll(".scroll-bar").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".thumb").forEach(node -> node.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
-            sp.lookupAll(".track").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-button, .decrement-button").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-            sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node -> node.setStyle("-fx-background-color: transparent;"));
-        });
-        bracketView.getChildren().add(sp);
-        VBox.setVgrow(sp, Priority.ALWAYS);
-        Team champion = tournament.getTournamentWinner();
-        if (champion != null) addChampionDisplay(champion);
+        container.getChildren().add(pair);
     }
+}
+
+        addScrollPane(container, 550, true);
+            }
 
     private GridPane makeStandingsGrid(String[] headers, String headerColor) {
         GridPane grid = new GridPane();
@@ -2073,54 +2309,44 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     // =========================================================================
 
     private HBox createMatchResultRow(Match match) {
-        HBox row = new HBox(15);
-        row.setAlignment(Pos.CENTER_LEFT);
-        row.setPadding(new Insets(6, 10, 6, 10));
-        row.setStyle("-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 0 0 1 0;");
-        String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
-        String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
-        Label matchLabel = new Label(t1 + " vs " + t2);
-        matchLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
-        matchLabel.setTextFill(Color.web("#E0E6ED"));
-        matchLabel.setPrefWidth(200);
-        Label resultLabel = new Label();
-        resultLabel.setFont(Font.font("Arial", 12));
-        if (match.isCompleted() && match.getWinner() != null) {
-            resultLabel.setText("WINNER: " + match.getWinner().getName() + " (" + match.getScore() + ")");
-            resultLabel.setTextFill(Color.web("#FFBA09"));
-        } else {
-            resultLabel.setText("PENDING");
-            resultLabel.setTextFill(Color.web("#e74c3c"));
-        }
-        String btnNormal = "-fx-background-color: #7F8EE3; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;";
-        String btnDone   = "-fx-background-color: #2a4080; -fx-text-fill: #7F8EE3; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;";
-        Button reportBtn = new Button(match.isCompleted() ? "Done" : "Report");
-        reportBtn.setStyle(match.isCompleted() ? btnDone : btnNormal);
-        reportBtn.setDisable(match.isCompleted());
-        if (!match.isCompleted()) {
-            reportBtn.setOnMouseEntered(e -> reportBtn.setStyle("-fx-background-color: #5a6abf; -fx-text-fill: white; -fx-font-weight: bold; -fx-padding: 4 12; -fx-background-radius: 3; -fx-border-radius: 3;"));
-            reportBtn.setOnMouseExited(e  -> reportBtn.setStyle(btnNormal));
-        }
-        reportBtn.setOnAction(e -> showScoreDialog(match));
-        Region spacer = new Region(); HBox.setHgrow(spacer, Priority.ALWAYS);
-        row.getChildren().addAll(matchLabel, spacer, resultLabel, reportBtn);
-        return row;
+    String normalStyle = "-fx-background-color: #152055; -fx-border-color: #7F8EE3; -fx-border-width: 0 0 1 0; -fx-cursor: default;";
+    String hoverStyle  = "-fx-background-color: #1e3060; -fx-border-color: #FFBA09;  -fx-border-width: 0 0 1 0; -fx-cursor: hand;";
+
+    HBox row = new HBox(15);
+    row.setAlignment(Pos.CENTER_LEFT);
+    row.setPadding(new Insets(6, 10, 6, 10));
+    row.setStyle(normalStyle);
+
+    String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
+    String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
+
+    Label matchLabel = new Label(t1 + " vs " + t2);
+    matchLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+    matchLabel.setTextFill(Color.web("#E0E6ED"));
+    matchLabel.setPrefWidth(200);
+
+    Label resultLabel = new Label();
+    resultLabel.setFont(Font.font("Arial", 12));
+    if (match.isCompleted() && match.getWinner() != null) {
+        resultLabel.setText("WINNER: " + match.getWinner().getName() + " (" + match.getScore() + ")");
+        resultLabel.setTextFill(Color.web("#FFBA09"));
+    } else {
+        resultLabel.setText("PENDING  ›");
+        resultLabel.setTextFill(Color.web("#e74c3c"));
     }
 
-    private HBox createSimpleMatchRow(Match match) {
-        HBox row = new HBox(10);
-        row.setAlignment(Pos.CENTER_LEFT);
-        row.setStyle("-fx-padding: 3;");
-        String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
-        String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
-        row.getChildren().add(new Label(t1 + " vs " + t2));
-        if (match.isCompleted() && match.getWinner() != null) {
-            Label w = new Label("→ " + match.getWinner().getName());
-            w.setTextFill(Color.GREEN);
-            row.getChildren().add(w);
-        }
-        return row;
+    Region spacer = new Region();
+    HBox.setHgrow(spacer, Priority.ALWAYS);
+    row.getChildren().addAll(matchLabel, spacer, resultLabel);
+
+    if (!match.isCompleted()) {
+        row.setOnMouseEntered(e -> row.setStyle(hoverStyle));
+        row.setOnMouseExited(e  -> row.setStyle(normalStyle));
+        row.setOnMouseClicked(e -> showScoreDialog(match));
     }
+
+    return row;
+}
 
     private void addChampionDisplay(Team champion) {
         HBox box = new HBox();
@@ -2218,6 +2444,7 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
                 if (score1 == score2) { showAlert("Error", "Scores cannot be tied — one team must win!"); return; }
                 // Winner is always determined by higher score — no dropdown needed
                 Team w = score1 > score2 ? match.getTeam1() : match.getTeam2();
+                pushUndoState();
                 tournament.recordWinner(match, w, score1, score2);
                 updateBracketView(); updateProgress();
                 showAlert("Success", "Match recorded!\n" + w.getName() + " wins " + score1 + "-" + score2);
@@ -2337,21 +2564,34 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
         gc.strokeLine(midX, targetY, dstLX, targetY);
     }
 
-    private void addScrollPane(Pane content, double prefHeight) {
+   private void addScrollPane(Pane content, double prefHeight) {
+    addScrollPane(content, prefHeight, false);  // brackets: don't fit to width
+}
+
+private void addScrollPane(javafx.scene.Node content, double prefHeight, boolean fitToWidth) {
+    bracketView.setStyle(
+        "-fx-background-color: #040D43;" +
+        "-fx-focus-color: transparent;" +
+        "-fx-faint-focus-color: transparent;"
+    );
+
     ScrollPane sp = new ScrollPane(content);
-    sp.setFitToWidth(false); sp.setFitToHeight(false);
+    sp.setFitToWidth(fitToWidth);
+    sp.setFitToHeight(false);
     sp.setPrefHeight(prefHeight);
     sp.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-    sp.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    sp.setHbarPolicy(fitToWidth ? ScrollPane.ScrollBarPolicy.NEVER : ScrollPane.ScrollBarPolicy.AS_NEEDED);
     sp.setStyle(
         "-fx-background: #040D43;" +
         "-fx-background-color: #040D43;" +
-        "-fx-border-color: transparent;" +
-        "-fx-border-width: 0;" +
+        "-fx-border-color: #7F8EE3;" +
+        "-fx-border-width: 1;" +
+        "-fx-border-radius: 5;" +
         "-fx-focus-color: transparent;" +
         "-fx-faint-focus-color: transparent;"
     );
     sp.getStylesheets().clear();
+    sp.setFocusTraversable(false);
     sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
         sp.lookupAll(".scroll-bar").forEach(node ->
             node.setStyle("-fx-background-color: transparent;"));
@@ -2363,14 +2603,20 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
             node.setStyle("-fx-background-color: transparent;"));
         sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(node ->
             node.setStyle("-fx-background-color: transparent;"));
+        javafx.scene.Node viewport = sp.lookup(".viewport");
+        if (viewport != null) {
+            viewport.setStyle("-fx-background-color: #040D43; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;");
+            viewport.focusedProperty().addListener((fo, wf, nf) ->
+                viewport.setStyle("-fx-background-color: #040D43; -fx-focus-color: transparent; -fx-faint-focus-color: transparent;"));
+        }
     });
-        sp.setHvalue(savedScrollH);
-        sp.setVvalue(savedScrollV);
-        sp.hvalueProperty().addListener((obs, oldVal, newVal) -> savedScrollH = newVal.doubleValue());
-        sp.vvalueProperty().addListener((obs, oldVal, newVal) -> savedScrollV = newVal.doubleValue());
-        bracketView.getChildren().clear();
-        bracketView.getChildren().add(sp);
-        VBox.setVgrow(sp, Priority.ALWAYS);
+    sp.setHvalue(savedScrollH);
+    sp.setVvalue(savedScrollV);
+    sp.hvalueProperty().addListener((obs, oldVal, newVal) -> savedScrollH = newVal.doubleValue());
+    sp.vvalueProperty().addListener((obs, oldVal, newVal) -> savedScrollV = newVal.doubleValue());
+    bracketView.getChildren().clear();
+    bracketView.getChildren().add(sp);
+    VBox.setVgrow(sp, Priority.ALWAYS);
 }
 
     private void addPaneLabel(Pane pane, String text, double x, double y, String color, FontWeight weight, int size) {
@@ -2403,12 +2649,67 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     }
 
     private void showAlert(String title, String message) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle(title); alert.setHeaderText(null); alert.setContentText(message);
-        alert.showAndWait();
+    Alert alert = new Alert(Alert.AlertType.NONE);
+    alert.setTitle(title);
+    alert.getButtonTypes().add(ButtonType.OK);
+
+    DialogPane dialogPane = alert.getDialogPane();
+    dialogPane.setMinSize(280, 160);
+    dialogPane.setPrefSize(280, 160);
+    dialogPane.setMaxSize(280, 160);
+    dialogPane.setStyle(
+        "-fx-background-color: #040D43;" +
+        "-fx-border-color: #7F8EE3;" +
+        "-fx-border-width: 2;" +
+        "-fx-border-radius: 8;" +
+        "-fx-background-radius: 8;"
+    );
+
+    javafx.scene.Node nativeButtonBar = dialogPane.lookup(".button-bar");
+    if (nativeButtonBar != null) {
+        nativeButtonBar.setVisible(false);
+        nativeButtonBar.setManaged(false);
     }
 
-    private boolean isPowerOfTwo(int n) { return n > 0 && (n & (n - 1)) == 0; }
+    Label contentLabel = new Label(message);
+    contentLabel.setMaxWidth(Double.MAX_VALUE);
+    contentLabel.setAlignment(Pos.CENTER);
+    contentLabel.setStyle(
+        "-fx-text-fill: #E0E6ED;" +
+        "-fx-font-size: 12px;" +
+        "-fx-font-family: Arial;" +
+        "-fx-font-weight: bold;"
+    );
+    contentLabel.setWrapText(true);
 
+    String baseStyle =
+        "-fx-background-color: #FFBA09;" +
+        "-fx-text-fill: #040D43;" +
+        "-fx-font-weight: bold;" +
+        "-fx-padding: 6 20;" +
+        "-fx-background-radius: 5;" +
+        "-fx-cursor: hand;";
+    String hoverStyle =
+        "-fx-background-color: #FFD862;" +
+        "-fx-text-fill: #040D43;" +
+        "-fx-font-weight: bold;" +
+        "-fx-padding: 6 20;" +
+        "-fx-background-radius: 5;" +
+        "-fx-cursor: hand;";
+
+    Button okButton = new Button("OK");
+    okButton.setStyle(baseStyle);
+    okButton.setOnAction(e -> alert.close());
+    okButton.setOnMouseEntered(e -> okButton.setStyle(hoverStyle));
+    okButton.setOnMouseExited(e -> okButton.setStyle(baseStyle));
+
+    VBox centerLayout = new VBox(40);
+    centerLayout.setAlignment(Pos.CENTER);
+    centerLayout.setPadding(new Insets(80, 15, 20, 15));
+    centerLayout.getChildren().addAll(contentLabel, okButton);
+    dialogPane.setContent(centerLayout);
+    alert.showAndWait();
+}
+    private boolean isPowerOfTwo(int n) { return n > 0 && (n & (n - 1)) == 0; }
     public static void main(String[] args) { launch(args); }
 }

@@ -1636,15 +1636,40 @@ public class TournamentBracket {
     // =========================================================================
 
     private void buildFreeForAll(Team[] teams) {
-        this.totalRounds = 2;
+        // FFA = full round-robin schedule (every team plays every other team once),
+        // distributed across (n-1) rounds using the standard circle/polygon algorithm.
+        // Requires at least 4 teams.
+        int n = teams.length;
         allMatches.clear();
-        for (int i = 0; i < teams.length; i++)
-            for (int j = i + 1; j < teams.length; j++) {
-                Match m = new Match(1);
-                m.setTeam1(teams[i]);
-                m.setTeam2(teams[j]);
-                allMatches.add(m);
+
+        // If n is odd, add a dummy null slot so the circle algorithm works cleanly
+        // (the match involving null is simply skipped).
+        int size = (n % 2 == 0) ? n : n + 1;
+        Team[] circle = new Team[size];
+        for (int i = 0; i < n; i++) circle[i] = teams[i];
+        // circle[size-1] == null for odd n
+
+        int numRounds = size - 1;
+        this.totalRounds = numRounds;
+
+        for (int round = 1; round <= numRounds; round++) {
+            // Pair position 0 with position (size/2), then 1 with (size-1), 2 with (size-2), …
+            for (int i = 0; i < size / 2; i++) {
+                Team t1 = circle[i];
+                Team t2 = circle[size - 1 - i];
+                if (t1 != null && t2 != null) {
+                    Match m = new Match(round);
+                    m.setTeam1(t1);
+                    m.setTeam2(t2);
+                    allMatches.add(m);
+                }
             }
+            // Rotate: keep circle[0] fixed, rotate the rest one step clockwise
+            Team last = circle[size - 1];
+            for (int i = size - 1; i > 1; i--) circle[i] = circle[i - 1];
+            circle[1] = last;
+        }
+
         this.root = null;
     }
 
@@ -1794,6 +1819,9 @@ public class TournamentBracket {
         if (tournamentType == TournamentType.ROUND_ROBIN
                 || tournamentType == TournamentType.SWISS
                 || tournamentType == TournamentType.FREE_FOR_ALL) {
+            // Only declare a winner when every match has been played
+            for (Match m : allMatches) if (!m.isCompleted()) return null;
+            if (allMatches.isEmpty()) return null;
             Team champ = null; int best = -1;
             for (Team t : teams) {
                 if (t.getWins() > best) { best = t.getWins(); champ = t; }
@@ -1836,6 +1864,22 @@ public class TournamentBracket {
         System.out.println("✓ Recorded: " + match);
     }
 
+    public void revertMatch(Match match, String winnerId, String score) {
+    if (winnerId == null) {
+        // Match was incomplete in the snapshot — wipe its result
+        match.clearResult();
+    } else {
+        // Match was completed — find the winner by name and restore it
+        Team winner = null;
+        for (Team t : teams) {
+            if (t.getName().equals(winnerId)) { winner = t; break; }
+        }
+        if (winner != null) {
+            match.forceSetResult(winner, score);
+        }
+    }
+}
+
     private void propagateWinnerUp(Match currentMatch, Team winner) {
         Team loser = (currentMatch.getTeam1() == winner)
                      ? currentMatch.getTeam2() : currentMatch.getTeam1();
@@ -1865,6 +1909,7 @@ public class TournamentBracket {
             }
             return;
         }
+
 
         // ── Advance winner via child links (WB rounds + GF) ───────────────────
         for (Match m : allMatches) {

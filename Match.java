@@ -31,6 +31,7 @@ public class Match {
         this.isWinnersBracket = false;
     }
 
+
     // ── GETTERS ────────────────────────────────────────────────────────────
     public Match   getLeftChild()          { return leftChild; }
     public Match   getRightChild()         { return rightChild; }
@@ -77,6 +78,19 @@ public class Match {
         this.winner = winner;
         this.completed = true;
     }
+
+    public void clearResult() {
+    this.winner    = null;
+    this.score     = null;
+    this.completed = false;
+}
+
+/** Restores a previously recorded result without triggering propagation. */
+public void forceSetResult(Team winner, String score) {
+    this.winner    = winner;
+    this.score     = score;
+    this.completed = true;
+}
 
     @Override
     public String toString() {
