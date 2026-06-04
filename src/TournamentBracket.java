@@ -1,3 +1,4 @@
+package src;
 import java.util.*;
 
 public class TournamentBracket {
@@ -21,6 +22,7 @@ public class TournamentBracket {
     private Team[]      byeTeams;
     private List<Match> playInSlots;   // semifinal matches in main bracket
     private int         playInWinnersRounds; // WB rounds inside the play-in
+    private ScoreMatrix scoreMatrix;
 
     public TournamentBracket(Team[] teams) {
         this(teams, TournamentType.SINGLE_ELIMINATION);
@@ -37,6 +39,7 @@ public class TournamentBracket {
         this.playInMatches        = new ArrayList<>();
         this.mainBracketMatches   = new ArrayList<>();
         this.playInSlots          = new ArrayList<>();
+        this.scoreMatrix          = new ScoreMatrix(teams);
 
         if      (type == TournamentType.SINGLE_ELIMINATION) {
             if      (teams.length == 12) buildSingleElimination12(teams);
@@ -1853,6 +1856,18 @@ public class TournamentBracket {
         }
         match.setWinner(winner, score1, score2);
 
+        // Record scores in the matrix using team array index as ID
+        int id1 = -1, id2 = -1;
+        for (int i = 0; i < teams.length; i++) {
+            if (teams[i] == match.getTeam1()) id1 = i;
+            if (teams[i] == match.getTeam2()) id2 = i;
+        }
+        if (id1 >= 0 && id2 >= 0) {
+            int s1 = (match.getTeam1() == winner) ? score1 : score2;
+            int s2 = (match.getTeam2() == winner) ? score1 : score2;
+            scoreMatrix.recordMatch(id1, id2, s1, s2);
+        }
+
         if (tournamentType == TournamentType.SINGLE_ELIMINATION
                 || tournamentType == TournamentType.DOUBLE_ELIMINATION)
             propagateWinnerUp(match, winner);
@@ -1863,6 +1878,8 @@ public class TournamentBracket {
 
         System.out.println("✓ Recorded: " + match);
     }
+
+    public ScoreMatrix getScoreMatrix() { return scoreMatrix; }
 
     public void revertMatch(Match match, String winnerId, String score) {
     if (winnerId == null) {
