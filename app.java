@@ -831,6 +831,13 @@ public class app extends Application {
         saveBracketBtn.setOnAction(e -> saveBracket());
         exitBtn.setOnAction(e       -> System.exit(0));
 
+        Button scoreMatrixBtn = new Button("SCORE MATRIX");
+        scoreMatrixBtn.setPrefWidth(Double.MAX_VALUE);
+        scoreMatrixBtn.setStyle(blueN);
+        scoreMatrixBtn.setOnMouseEntered(e -> scoreMatrixBtn.setStyle(blueH));
+        scoreMatrixBtn.setOnMouseExited(e  -> scoreMatrixBtn.setStyle(blueN));
+        scoreMatrixBtn.setOnAction(e -> showScoreMatrix());
+
         Label tip = new Label("Quick Tip: You can save and load your brackets.");
         tip.setFont(Font.font("Arial", 10));
         tip.setTextFill(Color.web("#E0E6ED"));
@@ -842,7 +849,7 @@ public class app extends Application {
             sportLabel, sportField,
             descLabel, descriptionArea,
             statusTitle, statusLabel,
-            separator, loadBtn, saveBracketBtn, exitBtn, tip
+            separator, loadBtn, saveBracketBtn, scoreMatrixBtn, exitBtn, tip
         );
         return panel;
     }
@@ -1696,14 +1703,14 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
 
         // ── Section labels ───────────────────────────────────────────────────
         double wbTopY = matchY.entrySet().stream()
-    .filter(e -> visWbByRound.values().stream().anyMatch(list -> list.contains(e.getKey())))
-    .mapToDouble(Map.Entry::getValue).min().orElse(W_TOP_PAD);
-double lbTopY = matchY.entrySet().stream()
-    .filter(e -> losersByRound.values().stream().anyMatch(list -> list.contains(e.getKey())))
-    .mapToDouble(Map.Entry::getValue).min().orElse(lbOffsetY + 60);
+        .filter(e -> visWbByRound.values().stream().anyMatch(list -> list.contains(e.getKey())))
+        .mapToDouble(Map.Entry::getValue).min().orElse(W_TOP_PAD);
+        double lbTopY = matchY.entrySet().stream()
+        .filter(e -> losersByRound.values().stream().anyMatch(list -> list.contains(e.getKey())))
+        .mapToDouble(Map.Entry::getValue).min().orElse(lbOffsetY + 60);
 
-addPaneLabel(pane, "WINNERS BRACKET", wCols > 0 ? wColX[0] : 20, wbTopY - 52, "#FFBA09", FontWeight.BOLD, 13);
-addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#FFBA09", FontWeight.BOLD, 13);
+        addPaneLabel(pane, "WINNERS BRACKET", wCols > 0 ? wColX[0] : 20, wbTopY - 52, "#FFBA09", FontWeight.BOLD, 13);
+        addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#FFBA09", FontWeight.BOLD, 13);
 
         // ── WB round labels ──────────────────────────────────────────────────
         for (int ri = 0; ri < wRoundKeys.size(); ri++) {
@@ -2445,7 +2452,6 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
                 pushUndoState();
                 tournament.recordWinner(match, w, score1, score2);
                 updateBracketView(); updateProgress();
-                showAlert("Success", "Match recorded!\n" + w.getName() + " wins " + score1 + "-" + score2);
                 dlg.close();
             } catch (NumberFormatException ex) { showAlert("Error", "Please enter valid numbers for scores!"); }
         });
@@ -2645,6 +2651,531 @@ private void addScrollPane(javafx.scene.Node content, double prefHeight, boolean
         if (hex.equals("#e74c3c")) return "#c0392b";
         return hex;
     }
+
+   // =========================================================================
+// SCORE MATRIX — router + per-format implementations
+//
+// HOW TO APPLY:
+//   1. Delete the existing showScoreMatrix() method from app.java.
+//   2. Paste ALL of this code in its place (inside the app class body).
+// =========================================================================
+
+// ── Router ────────────────────────────────────────────────────────────────
+private void showScoreMatrix() {
+    if (tournament == null || teams.length == 0) {
+        showAlert("Score Matrix", "No tournament data available.");
+        return;
+    }
+    switch (bracketTypeCombo.getValue()) {
+        case "Round Robin":
+        case "Free For All":
+            showGridScoreMatrix();
+            break;
+        case "Swiss System":
+            showSwissScoreMatrix();
+            break;
+        case "Single Elimination":
+        case "Double Elimination":
+            showEliminationScoreMatrix();
+            break;
+        default:
+            showGridScoreMatrix();
+    }
+}
+
+// ── 1. GRID MATRIX  (Round Robin / Free For All) ──────────────────────────
+//    Symmetric grid: row = team scored FROM, col = team scored AGAINST.
+//    Gold cell = that team won that matchup.
+private void showGridScoreMatrix() {
+    ScoreMatrix sm = tournament.getScoreMatrix();
+    int size = teams.length;
+
+    GridPane grid = new GridPane();
+    grid.setHgap(2);
+    grid.setVgap(2);
+    grid.setPadding(new Insets(4));
+
+    String headerStyle =
+        "-fx-background-color: #1a2a6c;" +
+        "-fx-text-fill: #FFD862;" +
+        "-fx-font-weight: bold;" +
+        "-fx-font-size: 11px;" +
+        "-fx-padding: 5 8;" +
+        "-fx-alignment: CENTER;" +
+        "-fx-border-color: #7F8EE3;" +
+        "-fx-border-width: 0 0 1 0;";
+    String diagStyle =
+        "-fx-background-color: #0a1540;" +
+        "-fx-text-fill: #7F8EE3;" +
+        "-fx-font-size: 11px;" +
+        "-fx-padding: 5 8;" +
+        "-fx-alignment: CENTER;";
+    String playedStyle =
+        "-fx-background-color: #152055;" +
+        "-fx-text-fill: #E0E6ED;" +
+        "-fx-font-size: 11px;" +
+        "-fx-padding: 5 8;" +
+        "-fx-alignment: CENTER;";
+    String pendingStyle =
+        "-fx-background-color: #152055;" +
+        "-fx-text-fill: #4a5a8a;" +
+        "-fx-font-size: 11px;" +
+        "-fx-padding: 5 8;" +
+        "-fx-alignment: CENTER;";
+
+    // Corner
+    Label corner = new Label("");
+    corner.setMinWidth(70);
+    corner.setStyle(headerStyle);
+    grid.add(corner, 0, 0);
+
+    // Column headers
+    for (int j = 0; j < size; j++) {
+        String name = teams[j].getName();
+        if (name.length() > 7) name = name.substring(0, 7);
+        Label hdr = new Label(name);
+        hdr.setMinWidth(55); hdr.setMaxWidth(55);
+        hdr.setWrapText(false);
+        hdr.setStyle(headerStyle);
+        hdr.setAlignment(Pos.CENTER);
+        grid.add(hdr, j + 1, 0);
+    }
+
+    // Data rows
+    for (int i = 0; i < size; i++) {
+        String rname = teams[i].getName();
+        if (rname.length() > 9) rname = rname.substring(0, 9);
+        Label rowHdr = new Label(rname);
+        rowHdr.setMinWidth(70);
+        rowHdr.setStyle(headerStyle);
+        grid.add(rowHdr, 0, i + 1);
+
+        for (int j = 0; j < size; j++) {
+            Label cell;
+            if (i == j) {
+                cell = new Label("—");
+                cell.setStyle(diagStyle);
+            } else {
+                int score = sm.getScore(i, j);
+                if (score == -1) {
+                    cell = new Label("?");
+                    cell.setStyle(pendingStyle);
+                } else {
+                    cell = new Label(String.valueOf(score));
+                    int opp = sm.getScore(j, i);
+                    boolean won = score > opp;
+                    cell.setStyle(playedStyle +
+                        (won ? "-fx-text-fill: #FFBA09; -fx-font-weight: bold;" : ""));
+                }
+            }
+            cell.setMinWidth(55); cell.setMaxWidth(55);
+            cell.setAlignment(Pos.CENTER);
+            grid.add(cell, j + 1, i + 1);
+        }
+    }
+
+    ScrollPane sp = buildStyledScrollPane(grid, 540, 300);
+
+    // Legend
+    Label legendWon     = new Label("■ Won");
+    legendWon.setStyle("-fx-text-fill: #FFBA09; -fx-font-size: 10px; -fx-font-weight: bold;");
+    Label legendPlayed  = new Label("■ Score recorded");
+    legendPlayed.setStyle("-fx-text-fill: #E0E6ED; -fx-font-size: 10px;");
+    Label legendPending = new Label("? Not yet played");
+    legendPending.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 10px;");
+    HBox legend = new HBox(16, legendWon, legendPlayed, legendPending);
+    legend.setAlignment(Pos.CENTER);
+
+    Label titleLbl = buildMatrixTitle(bracketTypeCombo.getValue().toUpperCase() + " SCORE MATRIX");
+    Label subtitleLbl = buildMatrixSubtitle("Row = team  ·  Column = opponent  ·  Gold = winner");
+    Button okBtn      = buildMatrixOkButton();
+
+    VBox layout = buildMatrixLayout(titleLbl, subtitleLbl, sp, legend, okBtn);
+
+    int dynW = Math.min(900, 120 + size * 55);
+    int dynH = Math.min(600, 200 + size * 30);
+    openMatrixStage("Score Matrix", layout, dynW, dynH);
+}
+
+// ── 2. SWISS ROUND-BY-ROUND TABLE ────────────────────────────────────────
+//    Shows every completed round as a titled block of match rows,
+//    then lists pending pairings for the current round.
+private void showSwissScoreMatrix() {
+    VBox container = new VBox(12);
+    container.setPadding(new Insets(4));
+    container.setStyle("-fx-background-color: #040D43;");
+
+    ScrollPane sp = buildStyledScrollPane(container, 520, 360);
+    sp.setFitToWidth(true);
+
+    Label titleLbl    = buildMatrixTitle("SWISS — Round Results");
+    Label subtitleLbl = buildMatrixSubtitle("All completed rounds  ·  Click a pending match to report");
+    Button okBtn      = buildMatrixOkButton();
+    VBox layout       = buildMatrixLayout(titleLbl, subtitleLbl, sp, new HBox(), okBtn);
+
+    Stage stage = new Stage();
+    stage.setTitle("Swiss Score Matrix");
+    stage.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+    Scene scene = new Scene(layout, 520, 500);
+    scene.setFill(Color.web("#040D43"));
+    stage.setScene(scene);
+    stage.setResizable(true);
+
+    Runnable[] refreshRef = { null };
+    refreshRef[0] = () -> {
+        container.getChildren().clear();
+
+        int totalRounds = tournament.getTotalRounds();
+        boolean anyCompleted = false;
+        for (int r = 1; r <= totalRounds; r++) {
+            List<Match> roundMatches = tournament.getMatchesByRound(r);
+            List<Match> completed = new ArrayList<>();
+            for (Match m : roundMatches) if (m.isCompleted()) completed.add(m);
+            if (completed.isEmpty()) continue;
+            anyCompleted = true;
+
+            Label roundLbl = new Label("Round " + r + " Results");
+            roundLbl.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+            roundLbl.setTextFill(Color.web("#FFBA09"));
+            roundLbl.setPadding(new Insets(4, 0, 2, 0));
+            container.getChildren().add(roundLbl);
+
+            for (Match m : completed)
+                container.getChildren().add(buildSwissMatchRow(m, stage, refreshRef[0]));
+        }
+
+        if (!anyCompleted) {
+            Label none = new Label("No completed matches yet.");
+            none.setStyle("-fx-text-fill: #7F8EE3; -fx-font-size: 12px;");
+            container.getChildren().add(none);
+        }
+
+        List<Match> pending = tournament.getPendingMatches();
+        if (!pending.isEmpty()) {
+            Label pendingLbl = new Label("Current Round Pairings");
+            pendingLbl.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+            pendingLbl.setTextFill(Color.web("#7F8EE3"));
+            pendingLbl.setPadding(new Insets(10, 0, 2, 0));
+            container.getChildren().add(pendingLbl);
+            for (Match m : pending)
+                container.getChildren().add(buildSwissMatchRow(m, stage, refreshRef[0]));
+        }
+    };
+
+    refreshRef[0].run(); // initial population
+    stage.showAndWait();
+}
+
+private HBox buildSwissMatchRow(Match m, Stage stage, Runnable refresh) {
+    String normalStyle = "-fx-background-color: #152055; -fx-border-color: #1a2a6c; -fx-border-width: 0 0 1 0;";
+    String hoverStyle  = "-fx-background-color: #1e3060; -fx-border-color: #FFBA09; -fx-border-width: 0 0 1 0; -fx-cursor: hand;";
+
+    HBox row = new HBox(10);
+    row.setPadding(new Insets(5, 10, 5, 10));
+    row.setAlignment(Pos.CENTER_LEFT);
+    row.setStyle(normalStyle);
+
+    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBD";
+    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBD";
+    boolean done = m.isCompleted();
+    String winnerName = (done && m.getWinner() != null) ? m.getWinner().getName() : null;
+
+    Label lbl1 = new Label(t1);
+    lbl1.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+    lbl1.setPrefWidth(130);
+    lbl1.setTextFill(Color.web(t1.equals(winnerName) ? "#FFBA09" : "#E0E6ED"));
+
+    Label vs = new Label("vs");
+    vs.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 11px;");
+
+    Label lbl2 = new Label(t2);
+    lbl2.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+    lbl2.setPrefWidth(130);
+    lbl2.setTextFill(Color.web(t2.equals(winnerName) ? "#FFBA09" : "#E0E6ED"));
+
+    Region spacer = new Region();
+    HBox.setHgrow(spacer, Priority.ALWAYS);
+
+    Label result = new Label();
+    result.setFont(Font.font("Arial", 11));
+    if (done && m.getScore() != null) {
+        result.setText(m.getScore());
+        result.setStyle("-fx-text-fill: #FFD862;");
+    } else {
+        result.setText("PENDING ›");
+        result.setStyle("-fx-text-fill: #e74c3c; -fx-font-size: 10px;");
+        row.setOnMouseEntered(e -> row.setStyle(hoverStyle));
+        row.setOnMouseExited(e  -> row.setStyle(normalStyle));
+        row.setOnMouseClicked(e -> {
+            showScoreDialog(m);
+            updateBracketView();
+            updateProgress();
+            if (refresh != null) refresh.run(); // ← rebuilds in-place
+        });
+    }
+
+    row.getChildren().addAll(lbl1, vs, lbl2, spacer, result);
+    return row;
+}
+
+private void showEliminationScoreMatrix() {
+    VBox container = new VBox(10);
+    container.setPadding(new Insets(4));
+    container.setStyle("-fx-background-color: #040D43;");
+
+    String type = bracketTypeCombo.getValue();
+    boolean isDE = "Double Elimination".equals(type);
+
+    ScrollPane sp = buildStyledScrollPane(container, 520, 400);
+    sp.setFitToWidth(true);
+
+    String subtitle = isDE
+        ? "Winners & Losers brackets  ·  Click a pending match to report"
+        : "All rounds  ·  Click a pending match to report";
+
+    Label titleLbl    = buildMatrixTitle(isDE ? "DOUBLE ELIMINATION — Match Results" : "SINGLE ELIMINATION — Match Results");
+    Label subtitleLbl = buildMatrixSubtitle(subtitle);
+    Button okBtn      = buildMatrixOkButton();
+    VBox layout       = buildMatrixLayout(titleLbl, subtitleLbl, sp, new HBox(), okBtn);
+
+    Stage stage = new Stage();
+    stage.setTitle("Match Results");
+    stage.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+    Scene scene = new Scene(layout, 520, 560);
+    scene.setFill(Color.web("#040D43"));
+    stage.setScene(scene);
+    stage.setResizable(true);
+
+    // Wire refresh into the actual Runnable now that it's defined
+    Runnable[] refreshRef = { null };
+    refreshRef[0] = () -> {
+        container.getChildren().clear();
+        if (isDE) {
+            addElimSection(container, "WINNERS BRACKET", getDeWinnersMatches(), true, stage, refreshRef[0]);
+            addElimSection(container, "LOSERS BRACKET", tournament.getLosersBracketMatches(), false, stage, refreshRef[0]);
+            Match gf = tournament.getGrandFinals();
+            if (gf != null) {
+                Label gfLbl = new Label("GRAND FINAL");
+                gfLbl.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+                gfLbl.setTextFill(Color.web("#FFBA09"));
+                gfLbl.setPadding(new Insets(8, 0, 2, 0));
+                container.getChildren().add(gfLbl);
+                container.getChildren().add(buildElimMatchRow(gf, stage, refreshRef[0]));
+            }
+        } else {
+            int totalRounds = tournament.getTotalRounds();
+            for (int r = 1; r <= totalRounds; r++) {
+                List<Match> ms = tournament.getMatchesByRound(r);
+                if (ms.isEmpty()) continue;
+                int fromEnd = totalRounds - r;
+                String rName = fromEnd == 0 ? "Championship" : fromEnd == 1 ? "Finals"
+                             : fromEnd == 2 ? "Semifinals"   : fromEnd == 3 ? "Quarterfinals"
+                             : "Round " + r;
+                Label rLbl = new Label(rName);
+                rLbl.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+                rLbl.setTextFill(Color.web("#FFBA09"));
+                rLbl.setPadding(new Insets(6, 0, 2, 0));
+                container.getChildren().add(rLbl);
+                for (Match m : ms) {
+                    boolean isBye = m.isCompleted() && (m.getTeam1() == null || m.getTeam2() == null);
+                    if (isBye) continue;
+                    container.getChildren().add(buildElimMatchRow(m, stage, refreshRef[0]));
+                }
+            }
+        }
+    };
+
+    refreshRef[0].run(); // initial population
+    stage.showAndWait();
+}
+
+private void addElimSection(VBox container, String sectionTitle, List<Match> matches,
+                             boolean isWinners, Stage stage, Runnable refresh) {
+    if (matches == null || matches.isEmpty()) return;
+
+    Label secLbl = new Label(sectionTitle);
+    secLbl.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+    secLbl.setTextFill(Color.web("#FFBA09"));
+    secLbl.setPadding(new Insets(8, 0, 2, 0));
+    container.getChildren().add(secLbl);
+
+    Map<Integer, List<Match>> byRound = new java.util.LinkedHashMap<>();
+    for (Match m : matches)
+        byRound.computeIfAbsent(m.getRound(), k -> new ArrayList<>()).add(m);
+
+    List<Integer> rounds = new ArrayList<>(byRound.keySet());
+    Collections.sort(rounds);
+    int totalRoundsInSection = rounds.size();
+
+    for (int ri = 0; ri < rounds.size(); ri++) {
+        int r = rounds.get(ri);
+        List<Match> ms = byRound.get(r);
+        int fromEnd = totalRoundsInSection - 1 - ri;
+        String rName = isWinners
+            ? (fromEnd == 0 ? "Upper Final" : fromEnd == 1 ? "Upper Semis" : "Upper Round " + r)
+            : (fromEnd == 0 ? "Losers Final" : "Losers Round " + (ri + 1));
+
+        Label rLbl = new Label(rName);
+        rLbl.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+        rLbl.setTextFill(Color.web("#7F8EE3"));
+        rLbl.setPadding(new Insets(4, 0, 1, 8));
+        container.getChildren().add(rLbl);
+
+        for (Match m : ms) {
+            boolean isBye = m.isCompleted() && (m.getTeam1() == null || m.getTeam2() == null);
+            if (isBye) continue;
+            container.getChildren().add(buildElimMatchRow(m, stage, refresh));
+        }
+    }
+}
+
+private HBox buildElimMatchRow(Match m, Stage stage, Runnable refresh) {
+    String normalStyle = "-fx-background-color: #152055; -fx-border-color: #1a2a6c; -fx-border-width: 0 0 1 0;";
+    String hoverStyle  = "-fx-background-color: #1e3060; -fx-border-color: #FFBA09; -fx-border-width: 0 0 1 0; -fx-cursor: hand;";
+
+    HBox row = new HBox(10);
+    row.setPadding(new Insets(5, 10, 5, 10));
+    row.setAlignment(Pos.CENTER_LEFT);
+    row.setStyle(normalStyle);
+
+    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBD";
+    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBD";
+    boolean done = m.isCompleted();
+    String winnerName = (done && m.getWinner() != null) ? m.getWinner().getName() : null;
+
+    Label lbl1 = new Label(t1);
+    lbl1.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+    lbl1.setPrefWidth(130);
+    lbl1.setTextFill(Color.web(t1.equals(winnerName) ? "#FFBA09" : "#E0E6ED"));
+
+    Label vs = new Label("vs");
+    vs.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 11px;");
+
+    Label lbl2 = new Label(t2);
+    lbl2.setFont(Font.font("Arial", FontWeight.BOLD, 11));
+    lbl2.setPrefWidth(130);
+    lbl2.setTextFill(Color.web(t2.equals(winnerName) ? "#FFBA09" : "#E0E6ED"));
+
+    Region spacer = new Region();
+    HBox.setHgrow(spacer, Priority.ALWAYS);
+
+    Label result = new Label();
+    result.setFont(Font.font("Arial", 11));
+    if (done && m.getScore() != null) {
+        result.setText(m.getScore());
+        result.setStyle("-fx-text-fill: #FFD862;");
+    } else if (!t1.equals("TBD") && !t2.equals("TBD")) {
+        result.setText("PENDING ›");
+        result.setStyle("-fx-text-fill: #e74c3c; -fx-font-size: 10px;");
+        row.setOnMouseEntered(e -> row.setStyle(hoverStyle));
+        row.setOnMouseExited(e  -> row.setStyle(normalStyle));
+        row.setOnMouseClicked(e -> {
+            showScoreDialog(m);
+            updateBracketView();
+            updateProgress();
+            if (refresh != null) refresh.run(); // ← rebuilds list in-place
+        });
+    } else {
+        result.setText("TBD");
+        result.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 10px;");
+    }
+
+    row.getChildren().addAll(lbl1, vs, lbl2, spacer, result);
+    return row;
+}
+
+private List<Match> getDeWinnersMatches() {
+    List<Match> all = new ArrayList<>();
+    for (int r = 1; r <= 10; r++) { 
+        List<Match> ms = tournament.getWinnersMatchesByRound(r);
+        if (ms == null || ms.isEmpty()) break;
+        all.addAll(ms);
+    }
+    return all;
+}
+
+private Label buildMatrixTitle(String text) {
+    Label lbl = new Label(text);
+    lbl.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+    lbl.setTextFill(Color.web("#FFD862"));
+    return lbl;
+}
+
+private Label buildMatrixSubtitle(String text) {
+    Label lbl = new Label(text);
+    lbl.setFont(Font.font("Arial", 10));
+    lbl.setTextFill(Color.web("#7F8EE3"));
+    return lbl;
+}
+
+private Button buildMatrixOkButton() {
+    String baseStyle =
+        "-fx-background-color: #FFBA09; -fx-text-fill: #040D43;" +
+        "-fx-font-weight: bold; -fx-padding: 6 28;" +
+        "-fx-background-radius: 5; -fx-cursor: hand;";
+    String hoverStyle =
+        "-fx-background-color: #FFBA09; -fx-text-fill: #040D43;" +
+        "-fx-font-weight: bold; -fx-padding: 6 28;" +
+        "-fx-background-radius: 5; -fx-cursor: hand;";
+    Button btn = new Button("OK");
+    btn.setStyle(baseStyle);
+    btn.setOnMouseEntered(e -> btn.setStyle(hoverStyle));
+    btn.setOnMouseExited(e  -> btn.setStyle(baseStyle));
+    btn.setOnAction(e -> ((Stage) btn.getScene().getWindow()).close());
+    return btn;
+}
+
+private VBox buildMatrixLayout(Label title, Label subtitle, ScrollPane sp, HBox legend, Button okBtn) {
+    VBox layout = new VBox(10, title, subtitle, sp, legend, okBtn);
+    layout.setAlignment(Pos.CENTER);
+    layout.setFillWidth(true);
+    layout.setPadding(new Insets(20));
+    layout.setStyle("-fx-background-color: #040D43;");
+    VBox.setVgrow(sp, Priority.ALWAYS);
+    return layout;
+}
+
+private ScrollPane buildStyledScrollPane(javafx.scene.Node content, double prefW, double prefH) {
+    ScrollPane sp = new ScrollPane(content);
+    sp.setFitToWidth(false);
+    sp.setFitToHeight(false);
+    sp.setPrefSize(prefW, prefH);
+    sp.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+    VBox.setVgrow(sp, Priority.ALWAYS);
+    sp.setStyle(
+        "-fx-background: #040D43;" +
+        "-fx-background-color: #040D43;" +
+        "-fx-border-color: #7F8EE3;" +
+        "-fx-border-width: 1;" +
+        "-fx-border-radius: 4;"
+    );
+    sp.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        sp.lookupAll(".scroll-bar").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".thumb").forEach(n ->
+            n.setStyle("-fx-background-color: #7F8EE3; -fx-background-radius: 4;"));
+        sp.lookupAll(".track").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".increment-button, .decrement-button").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        sp.lookupAll(".increment-arrow, .decrement-arrow").forEach(n ->
+            n.setStyle("-fx-background-color: transparent;"));
+        javafx.scene.Node vp = sp.lookup(".viewport");
+        if (vp != null) vp.setStyle("-fx-background-color: #040D43;");
+    });
+    return sp;
+}
+
+private void openMatrixStage(String title, VBox layout, int width, int height) {
+    Stage stage = new Stage();
+    stage.setTitle(title);
+    stage.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+    Scene scene = new Scene(layout, width, height);
+    scene.setFill(Color.web("#040D43"));
+    stage.setScene(scene);
+    stage.setResizable(true);
+    stage.showAndWait();
+}
 
     private void showAlert(String title, String message) {
     Alert alert = new Alert(Alert.AlertType.NONE);
