@@ -34,10 +34,9 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 ## How to Use
 1. Add team names in the left panel and drag to reorder seeds
 2. Select teams to include, then choose a tournament format
-3. Click **Generate Bracket**
-4. Click a match card to enter scores — the bracket updates automatically
-5. Use **Undo** to revert any result
-6. Save your bracket at any time and reload it later
+3. Click a match card to enter scores — the bracket updates automatically who is the winner
+4. Use **Undo** to revert any result
+5. Save your bracket at any time and reload it later
 
 ---
 
@@ -49,7 +48,7 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 | `Match.java` | Match node storing teams, score, round, and Play-In flags |
 | `Team.java` | Team stats tracking wins, losses, and points |
 | `ScoreMatrix.java` | 2D matrix of head-to-head scores for Round Robin/Swiss formats |
-| `TournamentType.java` | Enum of all 7 supported tournament formats |
+| `TournamentType.java` | Enum of all 5 supported tournament formats |
 
 ---
 ## Data Model Overview
