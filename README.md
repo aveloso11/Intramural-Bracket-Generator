@@ -1,4 +1,4 @@
-# 🏆 Intramural Bracket Maker
+# 🏆 Intramural Bracket Generator
 
 A JavaFX desktop app for generating and managing intramural sports tournament brackets.
 
