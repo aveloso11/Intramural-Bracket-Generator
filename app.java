@@ -130,7 +130,7 @@ public class app extends Application {
         HBox header = new HBox();
         header.setPadding(new Insets(15));
         header.setStyle("-fx-background-color: linear-gradient(to right, #040D43 0%, #040D43 50%, #FFBA09 100%); -fx-border-width: 1 0 0 0;");
-        Label title = new Label("🏆 INTRAMURAL BRACKET MAKER"); 
+        Label title = new Label("🏆 INTRAMURAL BRACKET GENERATOR"); 
 
         title.setFont(Font.font("Arial", FontWeight.BOLD, 20));
         title.setTextFill(Color.web("#FFD862"));
