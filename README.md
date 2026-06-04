@@ -5,8 +5,7 @@ A JavaFX desktop app for generating and managing intramural sports tournament br
 ---
 
 ## Features
-
-- 7 tournament formats: Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, Play-In DE
+- **7 tournament formats:** Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, and Play-In DE
 - Auto-handles byes, seeding, and bracket propagation
 - Click any match to enter scores — winners advance automatically
 - Full undo stack for reverting results
@@ -33,7 +32,6 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 ---
 
 ## How to Use
-
 1. Add team names in the left panel and drag to reorder seeds
 2. Select teams to include, then choose a tournament format
 3. Click **Generate Bracket**
@@ -44,11 +42,34 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 ---
 
 ## Project Structure
-
 | File | Role |
 |---|---|
-| `app.java` | UI, event handling, bracket rendering |
-| `TournamentBracket.java` | Bracket logic and winner propagation |
-| `Match.java` | Match node: teams, score, round, flags |
-| `Team.java` | Team stats: wins, losses, points |
-| `TournamentType.java` | Enum of all 7 tournament formats |
+| `app.java` | UI layout, event handling, and bracket rendering |
+| `TournamentBracket.java` | Core bracket logic and winner propagation |
+| `Match.java` | Match node storing teams, score, round, and Play-In flags |
+| `Team.java` | Team stats tracking wins, losses, and points |
+| `ScoreMatrix.java` | 2D matrix of head-to-head scores for Round Robin/Swiss formats |
+| `TournamentType.java` | Enum of all 7 supported tournament formats |
+
+---
+## Data Model Overview
+```
+Match (tree node)
+├── leftChild / rightChild  → previous-round matches feeding into this one
+├── team1, team2            → competing teams (null = TBD/bye)
+├── winner, score           → set when the match is played
+├── round, matchId          → position in the bracket
+└── flags: isPlayIn, isPlayInGrandFinal, isMainBracket, isWinnersBracket
+```
+
+```
+Team
+├── id, name
+├── wins, losses
+└── pointsScored, pointsAllowed → updated automatically when a match is completed
+```
+
+```
+ScoreMatrix  (used in Round Robin / Swiss)
+└── int[n][n] grid → scores[A][B] = points A scored against B (-1 if not yet played)
+```
