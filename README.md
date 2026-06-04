@@ -5,7 +5,9 @@ A JavaFX desktop app for generating and managing intramural sports tournament br
 ---
 
 ## Features
-- **7 tournament formats:** Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, and Play-In DE
+- **5 tournament formats:** Single Elimination, Double Elimination, Round Robin, Swiss, Free For All, Play-In SE, and Play-In DE
+- Play-In SE [12,24] format
+- Play-In DE [12,24] format
 - Auto-handles byes, seeding, and bracket propagation
 - Click any match to enter scores — winners advance automatically
 - Full undo stack for reverting results
@@ -34,10 +36,9 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 ## How to Use
 1. Add team names in the left panel and drag to reorder seeds
 2. Select teams to include, then choose a tournament format
-3. Click **Generate Bracket**
-4. Click a match card to enter scores — the bracket updates automatically
-5. Use **Undo** to revert any result
-6. Save your bracket at any time and reload it later
+3. Click a match card to enter scores — the bracket updates automatically who is the winner
+4. Use **Undo** to revert any result
+5. Save your bracket at any time and reload it later
 
 ---
 
