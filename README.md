@@ -47,7 +47,7 @@ java --module-path /path/to/javafx/lib --add-modules javafx.controls,javafx.fxml
 | `TournamentBracket.java` | Core bracket logic and winner propagation |
 | `Match.java` | Match node storing teams, score, round, and Play-In flags |
 | `Team.java` | Team stats tracking wins, losses, and points |
-| `ScoreMatrix.java` | 2D matrix of head-to-head scores for Round Robin/Swiss formats |
+| `ScoreMatrix.java` | 2D matrix of head-to-head scores for Round Robin/Free For All  formats |
 | `TournamentType.java` | Enum of all 7 supported tournament formats |
 
 ---
