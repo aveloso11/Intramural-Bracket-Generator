@@ -1617,21 +1617,86 @@ public class TournamentBracket {
     // =========================================================================
 
     private void buildSwissSystem(Team[] teams) {
-        this.totalRounds = Math.min(5, teams.length / 2);
-        allMatches.clear();
-        List<Team> shuffled = new ArrayList<>(Arrays.asList(teams));
-        Collections.shuffle(shuffled);
-        for (int r = 1; r <= totalRounds; r++) {
-            for (int i = 0; i + 1 < shuffled.size(); i += 2) {
-                Match m = new Match(r);
-                m.setTeam1(shuffled.get(i));
-                m.setTeam2(shuffled.get(i + 1));
-                allMatches.add(m);
-            }
-            Collections.shuffle(shuffled);
-        }
-        this.root = null;
+    int numTeams = teams.length;
+    
+    // Determine number of rounds based on team count
+    int numRounds;
+    if (numTeams <= 8) {
+        numRounds = 3;
+    } else if (numTeams <= 16) {
+        numRounds = 4;
+    } else {
+        numRounds = 5;
     }
+    
+    this.totalRounds = numRounds;
+    allMatches.clear();
+    
+    // Create a list of team indices for pairing
+    List<Integer> teamIndices = new ArrayList<>();
+    for (int i = 0; i < numTeams; i++) {
+        teamIndices.add(i);
+    }
+    
+    // For each round, create pairings
+    for (int round = 1; round <= numRounds; round++) {
+        // Shuffle teams for this round
+        Collections.shuffle(teamIndices);
+        
+        // Pair them up
+        for (int i = 0; i < teamIndices.size(); i += 2) {
+            if (i + 1 < teamIndices.size()) {
+                int idx1 = teamIndices.get(i);
+                int idx2 = teamIndices.get(i + 1);
+                
+                // Check if these two teams have already played
+                boolean alreadyPlayed = false;
+                for (Match m : allMatches) {
+                    if ((m.getTeam1() == teams[idx1] && m.getTeam2() == teams[idx2]) ||
+                        (m.getTeam1() == teams[idx2] && m.getTeam2() == teams[idx1])) {
+                        alreadyPlayed = true;
+                        break;
+                    }
+                }
+                
+                // If they already played, try to swap with another team
+                if (alreadyPlayed) {
+                    // Find a different opponent
+                    for (int j = i + 2; j < teamIndices.size(); j++) {
+                        int potentialIdx = teamIndices.get(j);
+                        boolean playedWithPotential = false;
+                        for (Match m : allMatches) {
+                            if ((m.getTeam1() == teams[idx1] && m.getTeam2() == teams[potentialIdx]) ||
+                                (m.getTeam1() == teams[potentialIdx] && m.getTeam2() == teams[idx1])) {
+                                playedWithPotential = true;
+                                break;
+                            }
+                        }
+                        if (!playedWithPotential) {
+                            // Swap
+                            teamIndices.set(i + 1, potentialIdx);
+                            teamIndices.set(j, idx2);
+                            idx2 = potentialIdx;
+                            break;
+                        }
+                    }
+                }
+                
+                // Create the match
+                Match match = new Match(round);
+                match.setTeam1(teams[idx1]);
+                match.setTeam2(teams[idx2]);
+                allMatches.add(match);
+            }
+        }
+    }
+    
+    // Verify match count is correct
+    int expectedMatches = numRounds * (numTeams / 2);
+    System.out.println("Swiss System built: " + numTeams + " teams, " + numRounds + " rounds, " + allMatches.size() + " matches (expected: " + expectedMatches + ")");
+    
+    this.root = null;
+}
 
     // =========================================================================
     // FREE FOR ALL
