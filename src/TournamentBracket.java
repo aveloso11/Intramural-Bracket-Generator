@@ -1237,7 +1237,7 @@ public class TournamentBracket {
         int mainRoundBase = lbRoundNum + 1;
         int mainSize      = numByeTeams * 2;   // 4 or 8
 
-        // Build round-1 main bracket matches — each pairs 1 bye seed vs 1 PI survivor (TBD)
+        // Build round-1 main bracket matches — each pairs 1 bye seed vs 1 PI survivor (TBA)
         // Seeding: top seed faces weakest survivor (reverse pairing)
         List<Match> mainCurrent = new ArrayList<>();
         playInSlots = new ArrayList<>();
@@ -1504,7 +1504,7 @@ public class TournamentBracket {
 
         // Use seeded bracket ordering for mainSize
         int[] seedOrder = buildSeedOrder(mainSize);
-        // Map seed position → mainSlotTeam (null = play-in survivor TBD)
+        // Map seed position → mainSlotTeam (null = play-in survivor TBA)
         Team[] orderedSlots = new Team[mainSize];
         for (int i = 0; i < mainSize; i++) {
             int s = seedOrder[i];

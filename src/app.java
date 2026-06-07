@@ -518,8 +518,8 @@ public class app extends Application {
         List<Match> pending = new ArrayList<>();
         for (Match m : tournament.getAllMatches()) {
             if (!m.isCompleted() && m.getTeam1() != null && m.getTeam2() != null
-                    && !m.getTeam1().getName().equals("TBD")
-                    && !m.getTeam2().getName().equals("TBD")) {
+                    && !m.getTeam1().getName().equals("TBA")
+                    && !m.getTeam2().getName().equals("TBA")) {
                 pending.add(m);
             }
         }
@@ -2027,14 +2027,14 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
    
     private VBox createDeMatchCard(Match match, boolean isWinners, boolean isGrandFinal) {
         String border = "#FFBA09";
-        String t1Name = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
-        String t2Name = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
+        String t1Name = match.getTeam1() != null ? match.getTeam1().getName() : "TBA";
+        String t2Name = match.getTeam2() != null ? match.getTeam2().getName() : "TBA";
         boolean done  = match.isCompleted();
         Team winner   = match.getWinner();
         String score  = match.getScore() != null ? match.getScore() : "";
 
         boolean canReport = !done && match.getTeam1() != null && match.getTeam2() != null
-        && !t1Name.equals("TBD") && !t2Name.equals("TBD");
+        && !t1Name.equals("TBA") && !t2Name.equals("TBA");
 
         String normalStyle  = "-fx-background-color:#152055;-fx-border-color:" + border + ";-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-focus-color:transparent;-fx-faint-focus-color:transparent;" + (canReport ? "-fx-cursor:hand;" : "");
         String hoverStyle   = "-fx-background-color:#1a2a6a;-fx-border-color:#FFBA09;-fx-border-width:2;-fx-border-radius:4;-fx-background-radius:4;-fx-focus-color:transparent;-fx-faint-focus-color:transparent;-fx-cursor:hand;";
@@ -2342,8 +2342,8 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
     row.setPadding(new Insets(6, 10, 6, 10));
     row.setStyle(normalStyle);
 
-    String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBD";
-    String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBD";
+    String t1 = match.getTeam1() != null ? match.getTeam1().getName() : "TBA";
+    String t2 = match.getTeam2() != null ? match.getTeam2().getName() : "TBA";
 
     Label matchLabel = new Label(t1 + " vs " + t2);
     matchLabel.setFont(Font.font("Arial", FontWeight.BOLD, 12));
@@ -2502,8 +2502,8 @@ addPaneLabel(pane, "LOSERS BRACKET",  lCols > 0 ? lColX[0] : 20, lbTopY - 52, "#
             writer.println("MATCH RESULTS:");
             if (tournament != null) for (Match m : tournament.getAllMatches()) {
                 if (m.isCompleted()) {
-                    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBD";
-                    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBD";
+                    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBA";
+                    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBA";
                     writer.println(t1 + " vs " + t2 + " -> Winner: " + m.getWinner().getName() + " (" + m.getScore() + ")");
                 }
             }
@@ -2895,8 +2895,8 @@ private HBox buildSwissMatchRow(Match m, Stage stage, Runnable refresh) {
     row.setAlignment(Pos.CENTER_LEFT);
     row.setStyle(normalStyle);
 
-    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBD";
-    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBD";
+    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBA";
+    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBA";
     boolean done = m.isCompleted();
     String winnerName = (done && m.getWinner() != null) ? m.getWinner().getName() : null;
 
@@ -3058,8 +3058,8 @@ private HBox buildElimMatchRow(Match m, Stage stage, Runnable refresh) {
     row.setAlignment(Pos.CENTER_LEFT);
     row.setStyle(normalStyle);
 
-    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBD";
-    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBD";
+    String t1 = m.getTeam1() != null ? m.getTeam1().getName() : "TBA";
+    String t2 = m.getTeam2() != null ? m.getTeam2().getName() : "TBA";
     boolean done = m.isCompleted();
     String winnerName = (done && m.getWinner() != null) ? m.getWinner().getName() : null;
 
@@ -3084,7 +3084,7 @@ private HBox buildElimMatchRow(Match m, Stage stage, Runnable refresh) {
     if (done && m.getScore() != null) {
         result.setText(m.getScore());
         result.setStyle("-fx-text-fill: #FFD862;");
-    } else if (!t1.equals("TBD") && !t2.equals("TBD")) {
+    } else if (!t1.equals("TBA") && !t2.equals("TBA")) {
         result.setText("PENDING ›");
         result.setStyle("-fx-text-fill: #e74c3c; -fx-font-size: 10px;");
         row.setOnMouseEntered(e -> row.setStyle(hoverStyle));
@@ -3096,7 +3096,7 @@ private HBox buildElimMatchRow(Match m, Stage stage, Runnable refresh) {
             if (refresh != null) refresh.run(); // ← rebuilds list in-place
         });
     } else {
-        result.setText("TBD");
+        result.setText("TBA");
         result.setStyle("-fx-text-fill: #4a5a8a; -fx-font-size: 10px;");
     }
 
