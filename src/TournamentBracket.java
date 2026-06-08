@@ -1600,16 +1600,42 @@ public class TournamentBracket {
     // =========================================================================
 
     private void buildRoundRobin(Team[] teams) {
-        this.totalRounds = 1;
+        int n = teams.length;
         allMatches.clear();
-        for (int i = 0; i < teams.length; i++)
-            for (int j = i + 1; j < teams.length; j++) {
-                Match m = new Match(1);
-                m.setTeam1(teams[i]);
-                m.setTeam2(teams[j]);
-                allMatches.add(m);
+
+        // If n is odd, add a dummy null slot so the circle algorithm works cleanly.
+        // The match involving the null slot is simply skipped (that team has a bye).
+        int size = (n % 2 == 0) ? n : n + 1;
+        Team[] circle = new Team[size];
+        for (int i = 0; i < n; i++) circle[i] = teams[i];
+        // circle[size-1] == null when n is odd
+
+        int numRounds = size - 1;
+        this.totalRounds = numRounds;
+
+        int matchId = 1;
+        for (int round = 1; round <= numRounds; round++) {
+            // Pair position 0 vs size/2, then 1 vs size-1, 2 vs size-2, …
+            for (int i = 0; i < size / 2; i++) {
+                Team t1 = circle[i];
+                Team t2 = circle[size - 1 - i];
+                if (t1 != null && t2 != null) {
+                    Match m = new Match(round);
+                    m.setMatchId(matchId++);
+                    m.setTeam1(t1);
+                    m.setTeam2(t2);
+                    allMatches.add(m);
+                }
             }
+            // Rotate: keep circle[0] fixed, rotate the rest one step clockwise
+            Team last = circle[size - 1];
+            for (int i = size - 1; i > 1; i--) circle[i] = circle[i - 1];
+            circle[1] = last;
+        }
+
         this.root = null;
+        System.out.println("Round Robin built: " + n + " teams, " + numRounds
+            + " rounds, " + allMatches.size() + " matches");
     }
 
     // =========================================================================
