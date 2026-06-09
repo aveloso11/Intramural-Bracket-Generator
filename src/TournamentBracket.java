@@ -1642,87 +1642,145 @@ public class TournamentBracket {
     // SWISS SYSTEM
     // =========================================================================
 
+    // =========================================================================
+    // SWISS SYSTEM — lazy round generation
+    //
+    // Only Round 1 is generated at construction time.
+    // Call generateNextSwissRound() after every round's matches are all complete
+    // to produce the next round's standings-based pairings.
+    //
+    // Pairing order (each round):
+    //   1. Sort teams by wins DESC, Buchholz DESC, point-differential DESC
+    //   2. Greedily pair adjacent teams, skipping rematches with a look-ahead swap
+    //   3. If a team is left over (odd count), give a bye (1 win, no score recorded)
+    //
+    // Rounds per team count: 4-8 = 3, 9-16 = 4, 17-20 = 5
+    // =========================================================================
+
+    private int swissCurrentRound = 0;
+
     private void buildSwissSystem(Team[] teams) {
-    int numTeams = teams.length;
-    
-    // Determine number of rounds based on team count
-    int numRounds;
-    if (numTeams <= 8) {
-        numRounds = 3;
-    } else if (numTeams <= 16) {
-        numRounds = 4;
-    } else {
-        numRounds = 5;
+        int numTeams = teams.length;
+
+        if      (numTeams <=  8) this.totalRounds = 3;
+        else if (numTeams <= 16) this.totalRounds = 4;
+        else                     this.totalRounds = 5;
+
+        allMatches.clear();
+        swissCurrentRound = 0;
+        this.root = null;
+
+        generateNextSwissRound();
+
+        System.out.println("Swiss System built: " + numTeams + " teams, "
+            + totalRounds + " rounds planned, R1 matches=" + allMatches.size());
     }
-    
-    this.totalRounds = numRounds;
-    allMatches.clear();
-    
-    // Create a list of team indices for pairing
-    List<Integer> teamIndices = new ArrayList<>();
-    for (int i = 0; i < numTeams; i++) {
-        teamIndices.add(i);
+
+    /**
+     * Returns true if all matches in the current Swiss round are complete
+     * and there are still rounds left to generate.
+     */
+    public boolean canGenerateNextSwissRound() {
+        if (swissCurrentRound >= totalRounds) return false;
+        if (swissCurrentRound == 0) return false;
+        List<Match> current = getMatchesByRound(swissCurrentRound);
+        if (current.isEmpty()) return false;
+        for (Match m : current) if (!m.isCompleted()) return false;
+        return true;
     }
-    
-    // For each round, create pairings
-    for (int round = 1; round <= numRounds; round++) {
-        // Shuffle teams for this round
-        Collections.shuffle(teamIndices);
-        
-        // Pair them up
-        for (int i = 0; i < teamIndices.size(); i += 2) {
-            if (i + 1 < teamIndices.size()) {
-                int idx1 = teamIndices.get(i);
-                int idx2 = teamIndices.get(i + 1);
-                
-                // Check if these two teams have already played
-                boolean alreadyPlayed = false;
-                for (Match m : allMatches) {
-                    if ((m.getTeam1() == teams[idx1] && m.getTeam2() == teams[idx2]) ||
-                        (m.getTeam1() == teams[idx2] && m.getTeam2() == teams[idx1])) {
-                        alreadyPlayed = true;
-                        break;
-                    }
+
+    /**
+     * Generates the next Swiss round's pairings based on current standings.
+     * Called at construction (R1) and after each round completes.
+     */
+    public void generateNextSwissRound() {
+        if (swissCurrentRound >= totalRounds) return;
+        swissCurrentRound++;
+        int round = swissCurrentRound;
+
+        List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
+
+        // Round 1: shuffle for variety; subsequent rounds: standings-based
+        if (round == 1) {
+            Collections.shuffle(sorted);
+        } else {
+            sorted.sort((a, b) -> {
+                int wDiff = Integer.compare(b.getWins(), a.getWins());
+                if (wDiff != 0) return wDiff;
+                int bDiff = Integer.compare(buchholz(b), buchholz(a));
+                if (bDiff != 0) return bDiff;
+                return Integer.compare(b.getPointDifference(), a.getPointDifference());
+            });
+        }
+
+        List<Team> unpaired = new ArrayList<>(sorted);
+        List<int[]> pairs   = new ArrayList<>();
+
+        while (unpaired.size() >= 2) {
+            Team t1 = unpaired.remove(0);
+            boolean paired = false;
+            for (int j = 0; j < unpaired.size(); j++) {
+                Team t2 = unpaired.get(j);
+                if (!havePlayedBefore(t1, t2)) {
+                    unpaired.remove(j);
+                    pairs.add(new int[]{ indexOf(t1), indexOf(t2) });
+                    paired = true;
+                    break;
                 }
-                
-                // If they already played, try to swap with another team
-                if (alreadyPlayed) {
-                    // Find a different opponent
-                    for (int j = i + 2; j < teamIndices.size(); j++) {
-                        int potentialIdx = teamIndices.get(j);
-                        boolean playedWithPotential = false;
-                        for (Match m : allMatches) {
-                            if ((m.getTeam1() == teams[idx1] && m.getTeam2() == teams[potentialIdx]) ||
-                                (m.getTeam1() == teams[potentialIdx] && m.getTeam2() == teams[idx1])) {
-                                playedWithPotential = true;
-                                break;
-                            }
-                        }
-                        if (!playedWithPotential) {
-                            // Swap
-                            teamIndices.set(i + 1, potentialIdx);
-                            teamIndices.set(j, idx2);
-                            idx2 = potentialIdx;
-                            break;
-                        }
-                    }
-                }
-                
-                // Create the match
-                Match match = new Match(round);
-                match.setTeam1(teams[idx1]);
-                match.setTeam2(teams[idx2]);
-                allMatches.add(match);
+            }
+            // Every remaining opponent is a rematch — take closest anyway
+            if (!paired && !unpaired.isEmpty()) {
+                Team t2 = unpaired.remove(0);
+                pairs.add(new int[]{ indexOf(t1), indexOf(t2) });
             }
         }
+
+        // Bye for odd team count — create a bye match (team1 wins automatically)
+        if (!unpaired.isEmpty()) {
+            Team bye = unpaired.get(0);
+            Match byeMatch = new Match(round);
+            byeMatch.setTeam1(bye);
+            byeMatch.setWinner(bye, 1, 0); // auto-complete: bye = 1-0 win
+            allMatches.add(byeMatch);
+            System.out.println("Swiss R" + round + " BYE: " + bye.getName());
+        }
+
+        for (int[] p : pairs) {
+            Match m = new Match(round);
+            m.setTeam1(teams[p[0]]);
+            m.setTeam2(teams[p[1]]);
+            allMatches.add(m);
+        }
+
+        System.out.println("Swiss R" + round + " generated: " + pairs.size() + " matches");
     }
-    
-    // Verify match count is correct
-    int expectedMatches = numRounds * (numTeams / 2);
-    System.out.println("Swiss System built: " + numTeams + " teams, " + numRounds + " rounds, " + allMatches.size() + " matches (expected: " + expectedMatches + ")");
-    
-    this.root = null;
-}
+
+    /** Buchholz = sum of all opponents' current wins */
+    private int buchholz(Team t) {
+        int sum = 0;
+        for (Match m : allMatches) {
+            if (!m.isCompleted()) continue;
+            if (m.getTeam1() == t && m.getTeam2() != null) sum += m.getTeam2().getWins();
+            else if (m.getTeam2() == t && m.getTeam1() != null) sum += m.getTeam1().getWins();
+        }
+        return sum;
+    }
+
+    private boolean havePlayedBefore(Team a, Team b) {
+        for (Match m : allMatches) {
+            if ((m.getTeam1() == a && m.getTeam2() == b)
+             || (m.getTeam1() == b && m.getTeam2() == a)) return true;
+        }
+        return false;
+    }
+
+    private int indexOf(Team t) {
+        for (int i = 0; i < teams.length; i++) if (teams[i] == t) return i;
+        return -1;
+    }
+
+    public int getSwissCurrentRound() { return swissCurrentRound; }
+
 
     // =========================================================================
     // FREE FOR ALL
@@ -1944,6 +2002,10 @@ public class TournamentBracket {
             System.out.println("Error: Match missing a team!");
             return;
         }
+        if (score1 == score2) {
+            System.out.println("Error: Tied scores (" + score1 + "-" + score2 + ") are not allowed. Match not recorded.");
+            return;
+        }
         match.setWinner(winner, score1, score2);
 
         // Record scores in the matrix using team array index as ID
@@ -1953,9 +2015,8 @@ public class TournamentBracket {
             if (teams[i] == match.getTeam2()) id2 = i;
         }
         if (id1 >= 0 && id2 >= 0) {
-            int s1 = (match.getTeam1() == winner) ? score1 : score2;
-            int s2 = (match.getTeam2() == winner) ? score1 : score2;
-            scoreMatrix.recordMatch(id1, id2, s1, s2);
+            // score1 is always team1's score, score2 is always team2's score — no swap needed
+            scoreMatrix.recordMatch(id1, id2, score1, score2);
         }
 
         if (tournamentType == TournamentType.SINGLE_ELIMINATION
@@ -1971,21 +2032,82 @@ public class TournamentBracket {
 
     public ScoreMatrix getScoreMatrix() { return scoreMatrix; }
 
-    public void revertMatch(Match match, String winnerId, String score) {
-    if (winnerId == null) {
-        // Match was incomplete in the snapshot — wipe its result
-        match.clearResult();
-    } else {
-        // Match was completed — find the winner by name and restore it
-        Team winner = null;
-        for (Team t : teams) {
-            if (t.getName().equals(winnerId)) { winner = t; break; }
-        }
-        if (winner != null) {
-            match.forceSetResult(winner, score);
+    /** Clears the entire score matrix (all matches revert to "not played"). */
+    public void clearScoreMatrix() {
+        for (int i = 0; i < teams.length; i++)
+            for (int j = 0; j < teams.length; j++)
+                scoreMatrix.clearMatch(i, j);
+    }
+
+    /** Public wrapper for recalculateTeamStats — used by the undo system in app.java. */
+    public void recalculateAllTeamStats() {
+        recalculateTeamStats();
+    }
+
+    /**
+     * Resets every team's win, loss, and point-difference counters to zero,
+     * then replays all completed matches to rebuild the correct totals.
+     * Call this after any undo/revert operation.
+     */
+    private void recalculateTeamStats() {
+        for (Team t : teams) t.resetStats();
+        for (Match m : allMatches) {
+            if (!m.isCompleted() || m.getWinner() == null) continue;
+            Team winner = m.getWinner();
+            Team loser  = (m.getTeam1() == winner) ? m.getTeam2() : m.getTeam1();
+            if (loser == null) continue;
+            if (m.getScore() != null) {
+                try {
+                    String[] parts = m.getScore().split("-");
+                    int s1 = Integer.parseInt(parts[0].trim());
+                    int s2 = Integer.parseInt(parts[1].trim());
+                    // s1 is always team1's score, s2 is always team2's score
+                    boolean winnerIsTeam1 = (m.getTeam1() == winner);
+                    int winnerScore = winnerIsTeam1 ? s1 : s2;
+                    int loserScore  = winnerIsTeam1 ? s2 : s1;
+                    winner.addWin(winnerScore, loserScore);
+                    loser.addLoss(loserScore, winnerScore);
+                } catch (Exception ignored) {
+                    // Fallback: no score data, just count the win/loss with zeros
+                    winner.addWin(0, 0);
+                    loser.addLoss(0, 0);
+                }
+            }
         }
     }
-}
+
+    public void revertMatch(Match match, String winnerId, String score) {
+        if (winnerId == null) {
+            // Match was incomplete in the snapshot — wipe its result
+            match.clearResult();
+        } else {
+            // Match was completed — find the winner by name and restore it
+            Team winner = null;
+            for (Team t : teams) {
+                if (t.getName().equals(winnerId)) { winner = t; break; }
+            }
+            if (winner != null) {
+                match.forceSetResult(winner, score);
+                // Re-record in the score matrix
+                int id1 = -1, id2 = -1;
+                for (int i = 0; i < teams.length; i++) {
+                    if (teams[i] == match.getTeam1()) id1 = i;
+                    if (teams[i] == match.getTeam2()) id2 = i;
+                }
+                if (id1 >= 0 && id2 >= 0 && score != null) {
+                    try {
+                        String[] parts = score.split("-");
+                        int s1 = Integer.parseInt(parts[0].trim());
+                        int s2 = Integer.parseInt(parts[1].trim());
+                        scoreMatrix.recordMatch(id1, id2, s1, s2);
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        // Note: call recalculateAllTeamStats() once after ALL matches are reverted
+        // (done by performUndo in app.java) rather than here per-match,
+        // to avoid counting partial state during the undo loop.
+    }
 
     private void propagateWinnerUp(Match currentMatch, Team winner) {
         Team loser = (currentMatch.getTeam1() == winner)

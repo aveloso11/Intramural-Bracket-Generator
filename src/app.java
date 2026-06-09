@@ -73,11 +73,22 @@ public class app extends Application {
         Map<Integer, MatchSnapshot> snapMap = new HashMap<>();
         for (MatchSnapshot s : frame) snapMap.put(s.matchId, s);
 
+        // Clear all matches first so score matrix and team stats are in a clean state
+        for (Match m : tournament.getAllMatches()) {
+            m.clearResult();
+        }
+        // Clear score matrix completely before replaying
+        tournament.clearScoreMatrix();
+
+        // Now restore each match to its snapshot state
         for (Match m : tournament.getAllMatches()) {
             MatchSnapshot s = snapMap.get(m.getMatchId());
             if (s == null) continue;
             tournament.revertMatch(m, s.winnerId, s.score);
         }
+
+        // Recalculate team stats once after all matches are restored
+        tournament.recalculateAllTeamStats();
 
         updateBracketView();
         updateProgress();
@@ -289,8 +300,9 @@ public class app extends Application {
         if (e.getCode() == javafx.scene.input.KeyCode.ENTER) {
             String name = typingBuffer.toString().trim();
             if (!name.isEmpty()) {
-                if (teams.length >= 32) {
-                    showAlert("Team Limit Reached", "Maximum of 32 teams allowed.");
+                int maxAllowed = getMaxTeamsAllowed(bracketTypeCombo.getValue());
+                if (teams.length >= maxAllowed) {
+                    showAlert("Team Limit Reached", "Maximum of " + maxAllowed + " teams allowed.");
                 } else {
                     Team[] newTeams = new Team[teams.length + 1];
                     System.arraycopy(teams, 0, newTeams, 0, teams.length);
@@ -527,6 +539,7 @@ public class app extends Application {
             showAlert("Simulate", "No pending matches to simulate.");
             return;
         }
+        pushUndoState();
         for (Match m : pending) {
             int s1, s2;
             do {
@@ -584,10 +597,22 @@ public class app extends Application {
                 return (isPowerOfTwo(n) && n >= 4 && n <= 32) || n == 24 || n == 12;
             case "Round Robin":
                 return n >= 3 && n <= 8;
+            case "Swiss System":
+                return n >= 4 && n <= 20;
             case "Free For All":
-                return n >= 4;
+                return n >= 4 && n <= 12;
             default:
                 return n >= 4;
+        }
+    }
+
+    private int getMaxTeamsAllowed(String bracketType) {
+        if (bracketType == null) return 32;
+        switch (bracketType) {
+            case "Round Robin":  return 8;
+            case "Swiss System": return 20;
+            case "Free For All": return 12;
+            default:             return 32;
         }
     }
 
@@ -894,7 +919,7 @@ public class app extends Application {
     // =========================================================================
 
     private String getNotReadyMessage(int n, String type) {
-    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-in SE (12, 24) \nPlay-in DE (12, 24) \nRound Robin (3–8 teams) \nSwiss System and Free For All require at least 4 teams.";
+    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-in SE (12, 24) \nPlay-in DE (12, 24) \nRound Robin (3–8 teams) \nSwiss System (4–20 teams) \nFree For All (4–12 teams).";
     
     if ("Single Elimination".equals(type)) {
         if (n < 4) return "Need at least 4 Participants for Single Elimination.";
@@ -934,11 +959,17 @@ public class app extends Application {
     
     if ("Free For All".equals(type)) {
         if (n < 4) return "Need at least 4 teams for Free For All.";
+        if (n > 12) return "Free For All supports a maximum of 12 teams.\nCurrent: " + n;
         return "";
     }
     if ("Round Robin".equals(type)) {
         if (n < 3) return "Need at least 3 teams for Round Robin.";
         if (n > 8) return "Round Robin supports a maximum of 8 teams.\nCurrent: " + n;
+        return "";
+    }
+    if ("Swiss System".equals(type)) {
+        if (n < 4)  return "Need at least 4 teams for Swiss System.";
+        if (n > 20) return "Swiss System supports a maximum of 20 teams.\nCurrent: " + n;
         return "";
     }
     if (n < 4) return "Need at least 4 teams for " + type + ".";
@@ -2122,67 +2153,30 @@ public class app extends Application {
 
         // ── Standings table ───────────────────────────────────────────────
         // Standard tiebreaker order:
-        //   1. Wins  2. Head-to-Head (among tied group)  3. Point Difference  4. Points Scored
+        //   1. Wins    2. Winrate 3. Point Differential
         GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Win %","PD"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
-        ScoreMatrix matrix = tournament.getScoreMatrix();
+        
 
         // Build team-index lookup (team object → index in original teams array)
         Map<Team, Integer> teamIndex = new HashMap<>();
         for (int i = 0; i < teams.length; i++) teamIndex.put(teams[i], i);
 
         sorted.sort((a, b) -> {
-            // 1. Most wins first
-            int wCmp = Integer.compare(b.getWins(), a.getWins());
-            if (wCmp != 0) return wCmp;
+        // 1. Win % (higher is better)
+        int wCmp = Double.compare(b.getWinPercentage(), a.getWinPercentage());
+        if (wCmp != 0) return wCmp;
 
-            // 2. Head-to-head among all teams tied on wins
-            //    Collect the full tied group for team a (same win count)
-            List<Team> tiedGroup = new ArrayList<>();
-            for (Team t : teams) if (t.getWins() == a.getWins()) tiedGroup.add(t);
+        // 2. Point Difference (higher is better)
+        int pdCmp = Integer.compare(b.getPointDifference(), a.getPointDifference());
+        if (pdCmp != 0) return pdCmp;
 
-            if (tiedGroup.size() >= 2 && tiedGroup.contains(a) && tiedGroup.contains(b)) {
-                // Count wins each team has against the others in the tied group
-                int aH2HWins = 0, bH2HWins = 0;
-                for (Team t : tiedGroup) {
-                    if (t == a || t == b) continue;
-                    Integer idxA = teamIndex.get(a), idxT = teamIndex.get(t);
-                    Integer idxB = teamIndex.get(b);
-                    if (idxA != null && idxT != null && matrix.hasPlayed(idxA, idxT)) {
-                        if (matrix.getScore(idxA, idxT) > matrix.getScore(idxT, idxA)) aH2HWins++;
-                    }
-                    if (idxB != null && idxT != null && matrix.hasPlayed(idxB, idxT)) {
-                        if (matrix.getScore(idxB, idxT) > matrix.getScore(idxT, idxB)) bH2HWins++;
-                    }
-                }
-                // Direct head-to-head between a and b
-                Integer idxA = teamIndex.get(a), idxB2 = teamIndex.get(b);
-                if (idxA != null && idxB2 != null && matrix.hasPlayed(idxA, idxB2)) {
-                    int sA = matrix.getScore(idxA, idxB2);
-                    int sB = matrix.getScore(idxB2, idxA);
-                    if (sA > sB) aH2HWins++;
-                    else if (sB > sA) bH2HWins++;
-                }
-                int h2hCmp = Integer.compare(bH2HWins, aH2HWins);
-                if (h2hCmp != 0) return h2hCmp;
-            }
-
-            // 3. Point difference (higher is better)
-            int pdCmp = Integer.compare(b.getPointDifference(), a.getPointDifference());
-            if (pdCmp != 0) return pdCmp;
-
-            // 4. Total points scored (higher is better)
-            Integer idxA = teamIndex.get(a), idxB = teamIndex.get(b);
-            int psA = (idxA != null) ? matrix.getTotalPointsScored(idxA) : 0;
-            int psB = (idxB != null) ? matrix.getTotalPointsScored(idxB) : 0;
-            int psCmp = Integer.compare(psB, psA);
-            if (psCmp != 0) return psCmp;
-
-            // 5. Stable fallback: original seeding order (ensures all teams always render)
-            int seedA = (idxA != null) ? idxA : 0;
-            int seedB = (idxB != null) ? idxB : 0;
-            return Integer.compare(seedA, seedB);
-        });
+        // 3. Stable fallback: original seeding order
+        Integer idxA = teamIndex.get(a), idxB = teamIndex.get(b);
+        int seedA = (idxA != null) ? idxA : 0;
+        int seedB = (idxB != null) ? idxB : 0;
+        return Integer.compare(seedA, seedB);
+    });
 
         // Assign ranks — teams still tied after all 4 criteria share the same rank
         // gridRow always increments so every team occupies its own GridPane row
@@ -2190,13 +2184,11 @@ public class app extends Application {
         for (int i = 0; i < sorted.size(); i++) {
             if (i > 0) {
                 Team prev = sorted.get(i - 1), curr = sorted.get(i);
-                Integer idxP = teamIndex.get(prev), idxC = teamIndex.get(curr);
-                boolean sameW  = prev.getWins() == curr.getWins();
-                boolean samePD = prev.getPointDifference() == curr.getPointDifference();
-                boolean samePS = (idxP != null && idxC != null)
-                    && matrix.getTotalPointsScored(idxP) == matrix.getTotalPointsScored(idxC);
-                if (!(sameW && samePD && samePS)) rank = i + 1;
+                boolean sameWinPct = Double.compare(prev.getWinPercentage(), curr.getWinPercentage()) == 0;
+                boolean samePD     = prev.getPointDifference() == curr.getPointDifference();
+                if (!(sameWinPct && samePD)) rank = i + 1;
             }
+
             int gridRow = i + 1; // always unique — prevents rows overwriting each other
             Team t = sorted.get(i);
             addStandingsRow(grid, gridRow, new String[]{
@@ -2243,63 +2235,124 @@ public class app extends Application {
 }
 
     private void displaySwissSystem() {
+        // Auto-advance: if all matches in current round are done, generate the next
+        if (tournament.canGenerateNextSwissRound()) {
+            tournament.generateNextSwissRound();
+        }
+
         VBox container = new VBox(15);
         container.setPadding(new Insets(20));
         container.setStyle("-fx-background-color: #040D43;");
-        Label title = new Label("SWISS SYSTEM TOURNAMENT");
+
+        // ── Title + round indicator ──────────────────────────────────────────
+        int curRound  = tournament.getSwissCurrentRound();
+        int totRounds = tournament.getTotalRounds();
+        Label title = new Label("SWISS SYSTEM TOURNAMENT  ·  Round " + curRound + " of " + totRounds);
         title.setFont(Font.font("Arial", FontWeight.BOLD, 16));
         title.setTextFill(Color.web("#FFD862"));
         container.getChildren().add(title);
 
-        GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Opp Score","Points"}, "#040D43");
+        // ── Standings table ──────────────────────────────────────────────────
+        // Columns: Rank | Team | Wins | Losses | Buchholz | Pts Scored
+        // Sort: Wins DESC → Buchholz DESC → Pt-Diff DESC
+        GridPane grid = makeStandingsGrid(
+            new String[]{"Rank","Team","Wins","Losses","Buchholz","Pts"}, "#040D43");
+
+        // Use ScoreMatrix.getTotalPointsScored for accurate per-team points
+        ScoreMatrix sm = tournament.getScoreMatrix();
+
+        java.util.function.Function<Team, Integer> ptsScored = (t) -> {
+            for (int i = 0; i < teams.length; i++)
+                if (teams[i] == t) return sm.getTotalPointsScored(i);
+            return 0;
+        };
+
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
         sorted.sort((a, b) -> {
-            int w = Integer.compare(b.getWins(), a.getWins());
-            return w != 0 ? w : Integer.compare(b.getPointsAllowed(), a.getPointsAllowed());
+            int wDiff = Integer.compare(b.getWins(), a.getWins());
+            if (wDiff != 0) return wDiff;
+            int bDiff = Integer.compare(swissBuchholz(b), swissBuchholz(a));
+            if (bDiff != 0) return bDiff;
+            return Integer.compare(ptsScored.apply(b), ptsScored.apply(a));
         });
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
             addStandingsRow(grid, i + 1, new String[]{
-                String.valueOf(i + 1), t.getName(),
-                String.valueOf(t.getWins()), String.valueOf(t.getLosses()),
-                String.valueOf(t.getPointsAllowed()), String.valueOf(t.getPointsScored())
+                String.valueOf(i + 1),
+                t.getName(),
+                String.valueOf(t.getWins()),
+                String.valueOf(t.getLosses()),
+                String.valueOf(swissBuchholz(t)),
+                String.valueOf(ptsScored.apply(t))
             });
         }
         container.getChildren().add(grid);
 
-        Label pLabel = new Label("CURRENT ROUND PAIRINGS");
+        // ── Current round pairings (current round only, not all pending) ─────
+        List<Match> currentRoundMatches = tournament.getMatchesByRound(curRound);
+        // Filter: only real (non-bye) pending matches
+        List<Match> currentPending = new ArrayList<>();
+        for (Match m : currentRoundMatches) {
+            if (!m.isCompleted() && m.getTeam1() != null && m.getTeam2() != null) {
+                currentPending.add(m);
+            }
+        }
+
+        boolean roundDone = currentPending.isEmpty();
+        boolean allDone   = curRound >= totRounds && roundDone;
+
+        Label pLabel = new Label(allDone
+            ? "TOURNAMENT COMPLETE"
+            : "ROUND " + curRound + " PAIRINGS");
         pLabel.setFont(Font.font("Arial", FontWeight.BOLD, 14));
         pLabel.setTextFill(Color.web("#FFBA09"));
         pLabel.setPadding(new Insets(8, 0, 2, 0));
         container.getChildren().add(pLabel);
-        List<Match> pending = tournament.getPendingMatches();
-        if (pending.isEmpty()) {
-        Label done = new Label("All rounds complete!");
-        done.setFont(Font.font("Arial", 12));
-        done.setTextFill(Color.web("#7F8EE3"));
-        container.getChildren().add(done);
+
+        if (allDone) {
+            Label done = new Label("All " + totRounds + " rounds complete! Check standings above.");
+            done.setFont(Font.font("Arial", 12));
+            done.setTextFill(Color.web("#7F8EE3"));
+            container.getChildren().add(done);
+        } else if (roundDone && curRound < totRounds) {
+            Label adv = new Label("Round " + curRound + " complete. Next round will generate when you record results.");
+            adv.setFont(Font.font("Arial", 12));
+            adv.setTextFill(Color.web("#7F8EE3"));
+            container.getChildren().add(adv);
         } else {
-        for (int i = 0; i < pending.size(); i += 2) {
-        HBox pair = new HBox(8);
-        pair.setFillHeight(true);
+            for (int i = 0; i < currentPending.size(); i += 2) {
+                HBox pair = new HBox(8);
+                pair.setFillHeight(true);
 
-        HBox left = createMatchResultRow(pending.get(i));
-        HBox.setHgrow(left, Priority.ALWAYS);
-        left.setMaxWidth(Double.MAX_VALUE);
-        pair.getChildren().add(left);
+                HBox left = createMatchResultRow(currentPending.get(i));
+                HBox.setHgrow(left, Priority.ALWAYS);
+                left.setMaxWidth(Double.MAX_VALUE);
+                pair.getChildren().add(left);
 
-        if (i + 1 < pending.size()) {
-            HBox right = createMatchResultRow(pending.get(i + 1));
-            HBox.setHgrow(right, Priority.ALWAYS);
-            right.setMaxWidth(Double.MAX_VALUE);
-            pair.getChildren().add(right);
+                if (i + 1 < currentPending.size()) {
+                    HBox right = createMatchResultRow(currentPending.get(i + 1));
+                    HBox.setHgrow(right, Priority.ALWAYS);
+                    right.setMaxWidth(Double.MAX_VALUE);
+                    pair.getChildren().add(right);
+                }
+
+                container.getChildren().add(pair);
+            }
         }
 
-        container.getChildren().add(pair);
-        }
-    }
         addScrollPane(container, 550, true);
-}
+    }
+
+    /** Buchholz = sum of all opponents' wins (used in Swiss standings) */
+    private int swissBuchholz(Team t) {
+        int sum = 0;
+        for (Match m : tournament.getAllMatches()) {
+            if (!m.isCompleted()) continue;
+            if (m.getTeam1() == t && m.getTeam2() != null) sum += m.getTeam2().getWins();
+            else if (m.getTeam2() == t && m.getTeam1() != null) sum += m.getTeam1().getWins();
+        }
+        return sum;
+    }
 
     private void displayFreeForAll() {
         VBox container = new VBox(15);
@@ -2314,10 +2367,25 @@ public class app extends Application {
         // Standings grid
         GridPane grid = makeStandingsGrid(new String[]{"Rank","Team","Wins","Losses","Pts Scored","Pts Allowed"}, "#040D43");
         List<Team> sorted = new ArrayList<>(Arrays.asList(teams));
+        ScoreMatrix ffaSm = tournament.getScoreMatrix();
+        // Build a team → index map for ScoreMatrix lookups
+        Map<Team, Integer> ffaIdx = new HashMap<>();
+        for (int i = 0; i < teams.length; i++) ffaIdx.put(teams[i], i);
         sorted.sort((a, b) -> {
+            // 1st: most wins
             int wDiff = Integer.compare(b.getWins(), a.getWins());
             if (wDiff != 0) return wDiff;
-            return Integer.compare(b.getPointsScored(), a.getPointsScored());
+            // 2nd: most points scored
+            int idxA = ffaIdx.getOrDefault(a, -1);
+            int idxB = ffaIdx.getOrDefault(b, -1);
+            int psA = (idxA >= 0) ? ffaSm.getTotalPointsScored(idxA) : 0;
+            int psB = (idxB >= 0) ? ffaSm.getTotalPointsScored(idxB) : 0;
+            int psDiff = Integer.compare(psB, psA);
+            if (psDiff != 0) return psDiff;
+            // 3rd: fewest points allowed
+            int paA = (idxA >= 0) ? ffaSm.getTotalPointsAllowed(idxA) : 0;
+            int paB = (idxB >= 0) ? ffaSm.getTotalPointsAllowed(idxB) : 0;
+            return Integer.compare(paA, paB);
         });
         for (int i = 0; i < sorted.size(); i++) {
             Team t = sorted.get(i);
@@ -2854,8 +2922,11 @@ private void showGridScoreMatrix() {
                     cell = new Label(String.valueOf(score));
                     int opp = sm.getScore(j, i);
                     boolean won = score > opp;
-                    cell.setStyle(playedStyle +
-                        (won ? "-fx-text-fill: #FFBA09; -fx-font-weight: bold;" : ""));
+                    boolean tied = score == opp;
+                    String cellExtra = won  ? "-fx-text-fill: #FFBA09; -fx-font-weight: bold;"
+                                     : tied ? "-fx-text-fill: #e74c3c; -fx-font-weight: bold;"
+                                     :        "";
+                    cell.setStyle(playedStyle + cellExtra);
                 }
             }
             cell.setMinWidth(55); cell.setMaxWidth(55);
@@ -2940,9 +3011,15 @@ private void showSwissScoreMatrix() {
             container.getChildren().add(none);
         }
 
-        List<Match> pending = tournament.getPendingMatches();
+        // Show only current round's pending matches (not all future rounds)
+        int swissCurRound = tournament.getSwissCurrentRound();
+        List<Match> curRoundMatches = tournament.getMatchesByRound(swissCurRound);
+        List<Match> pending = new ArrayList<>();
+        for (Match m : curRoundMatches)
+            if (!m.isCompleted() && m.getTeam1() != null && m.getTeam2() != null)
+                pending.add(m);
         if (!pending.isEmpty()) {
-            Label pendingLbl = new Label("Current Round Pairings");
+            Label pendingLbl = new Label("Round " + swissCurRound + " — Pending");
             pendingLbl.setFont(Font.font("Arial", FontWeight.BOLD, 12));
             pendingLbl.setTextFill(Color.web("#7F8EE3"));
             pendingLbl.setPadding(new Insets(10, 0, 2, 0));
