@@ -576,13 +576,13 @@ public class app extends Application {
     // =========================================================================
 
     private String resolveActualType(String selectedType, int teamCount) {
-        if ("Single Elimination".equals(selectedType) && teamCount == 12) {
+        if ("Play-ins SE".equals(selectedType)) {
             return "Single Elimination";
         }
-        if ("Double Elimination".equals(selectedType) && teamCount == 12) {
-            return "Double Elimination";
+        if ("Play-ins DE".equals(selectedType)) {
+            return (teamCount == 12) ? "Double Elimination" : "Double Elimination";
         }
-        if ("Double Elimination".equals(selectedType) && !isPowerOfTwo(teamCount) && teamCount != 24) {
+        if ("Double Elimination".equals(selectedType) && !isPowerOfTwo(teamCount)) {
             return "Play-In Double Elimination";
         }
         return selectedType;
@@ -592,9 +592,13 @@ public class app extends Application {
         if (n == 0) return false;
         switch (bracketType) {
             case "Single Elimination":
-                return n == 4 || n == 8 || n == 12 || n == 16 || n == 24 || n == 32;
+                return n == 4 || n == 8 || n == 16 || n == 32;
             case "Double Elimination":
-                return (isPowerOfTwo(n) && n >= 4 && n <= 32) || n == 24 || n == 12;
+                return isPowerOfTwo(n) && n >= 4 && n <= 32;
+            case "Play-ins SE":
+                return n == 12 || n == 24;
+            case "Play-ins DE":
+                return n == 12 || n == 24;
             case "Round Robin":
                 return n >= 3 && n <= 8;
             case "Swiss System":
@@ -612,6 +616,8 @@ public class app extends Application {
             case "Round Robin":  return 8;
             case "Swiss System": return 20;
             case "Free For All": return 12;
+            case "Play-ins SE":  return 24;
+            case "Play-ins DE":  return 24;
             default:             return 32;
         }
     }
@@ -730,6 +736,8 @@ public class app extends Application {
         bracketTypeCombo.getItems().addAll(
             "Single Elimination",
             "Double Elimination",
+            "Play-ins SE",
+            "Play-ins DE",
             "Round Robin",
             "Swiss System",
             "Free For All"
@@ -919,40 +927,38 @@ public class app extends Application {
     // =========================================================================
 
     private String getNotReadyMessage(int n, String type) {
-    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-in SE (12, 24) \nPlay-in DE (12, 24) \nRound Robin (3–8 teams) \nSwiss System (4–20 teams) \nFree For All (4–12 teams).";
+    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-ins SE (12, 24) \nPlay-ins DE (12, 24) \nRound Robin (3–8 teams) \nSwiss System (4–20 teams) \nFree For All (4–12 teams).";
     
     if ("Single Elimination".equals(type)) {
         if (n < 4) return "Need at least 4 Participants for Single Elimination.";
-        
-        // Custom prompts for 12 and 24 Team Play-in brackets
-        if (n > 8 && n < 12) {
-            return "Add " + (12 - n) + " more team(s) to reach 12 Team Play-in SE.\n(Valid: 12, 24)";
-        }
-        if (n > 16 && n < 24) {
-            return "Add " + (24 - n) + " more team(s) to reach 24 Team Play-in SE.\n(Valid: 12, 24)";
-        }
-
-        int[] valid = {4, 8, 12, 16, 24, 32};
+        int[] valid = {4, 8, 16, 32};
         for (int v : valid) {
             if (n == v) return "";
             if (v > n)  return "Add " + (v - n) + " more team(s) to reach " + v + " teams.\n(Valid: 4, 8, 16, 32)";
         }
         return "Single Elimination supports 4, 8, 16, or 32 teams.\nCurrent: " + n;
     }
+
+    if ("Play-ins SE".equals(type)) {
+        if (n < 12) return "Add " + (12 - n) + " more team(s) to reach 12 teams.\n(Valid: 12, 24)";
+        if (n == 12) return "";
+        if (n < 24) return "Add " + (24 - n) + " more team(s) to reach 24 teams.\n(Valid: 12, 24)";
+        if (n == 24) return "";
+        return "Play-ins SE supports 12 or 24 teams.\nCurrent: " + n;
+    }
+
+    if ("Play-ins DE".equals(type)) {
+        if (n < 12) return "Add " + (12 - n) + " more team(s) to reach 12 teams.\n(Valid: 12, 24)";
+        if (n == 12) return "";
+        if (n < 24) return "Add " + (24 - n) + " more team(s) to reach 24 teams.\n(Valid: 12, 24)";
+        if (n == 24) return "";
+        return "Play-ins DE supports 12 or 24 teams.\nCurrent: " + n;
+    }
     
     if ("Double Elimination".equals(type)) {
         if (n < 4)  return "Need at least 4 teams for Double Elimination.";
-        
-        // Custom prompts for 12 and 24 Team Play-in brackets
-        if (n > 8 && n < 12) {
-            return "Add " + (12 - n) + " more team(s) to reach 12 Team Play-in DE.\n(Valid: 12, 24)";
-        }
-        if (n > 16 && n < 24) {
-            return "Add " + (24 - n) + " more team(s) to reach 24 Team Play-in DE.\n(Valid: 12, 24)";
-        }
-
-        if (isPowerOfTwo(n) || n == 24 || n == 12) return "";
-        int[] valid = {4, 8, 12, 16, 24, 32};
+        if (isPowerOfTwo(n)) return "";
+        int[] valid = {4, 8, 16, 32};
         for (int v : valid) if (v > n) return "Add " + (v - n) + " more team(s) for " + v + "-team Double Elimination.\n(Valid: 4, 8, 16, 32)";
         return "Double Elimination supports 4, 8, 16, 32 teams.\nCurrent: " + n;
     }
@@ -1016,14 +1022,20 @@ public class app extends Application {
 
     switch (currentType) {
         case "Single Elimination":
-            if (teams.length == 12) displaySingleElimination12();
-            else displaySingleElimination();
+            displaySingleElimination();
             break;
         case "Double Elimination":
-            if (teams.length == 12) displayDoubleElimination12();
-            else if (teams.length == 6 || teams.length == 10
+            if (teams.length == 6 || teams.length == 10
                     || teams.length == 20) displayPlayInDE();
             else displayDoubleElimination();
+            break;
+        case "Play-ins SE":
+            if (teams.length == 12) displaySingleElimination12();
+            else displaySingleElimination(); // 24-team falls through to generic SE with play-in logic
+            break;
+        case "Play-ins DE":
+            if (teams.length == 12) displayDoubleElimination12();
+            else displayDoubleElimination(); // 24-team
             break;
         case "Round Robin":  displayRoundRobin();  break;
         case "Swiss System": displaySwissSystem();  break;
