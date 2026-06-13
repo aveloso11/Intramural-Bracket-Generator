@@ -924,7 +924,7 @@ public class app extends Application {
     // =========================================================================
 
     private String getNotReadyMessage(int n, String type) {
-    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-ins SE (12, 24) \nPlay-ins DE (12, 24) \nRound Robin (3–8 teams) \nSwiss System (4–20 teams) \nFree For All (4–12 teams).";
+    if (n == 0) return "Single Elimination (4, 8, 16, 32) \nDouble Elimination (4, 8, 16, 32) \nPlay-ins SE (12, 24) \nPlay-ins DE (12, 24) \nRound Robin (3 - 8 teams) \nSwiss System (4 - 20 teams) \nFree For All (4 - 12 teams)";
     
     if ("Single Elimination".equals(type)) {
         if (n < 4) return "Need at least 4 Participants for Single Elimination.";
@@ -1170,7 +1170,7 @@ public class app extends Application {
             for (Match m : ms) {
                 if (!matchY.containsKey(m)) continue;
                 VBox card = createDeMatchCard(m, true, isLast);
-                card.setLayoutX(colX[ri] + 15); card.setLayoutY(matchY.get(m) + 15);
+                card.setLayoutX(colX[ri]); card.setLayoutY(matchY.get(m));
                 card.setPrefWidth(CARD_W); card.setMaxWidth(CARD_W);
                 pane.getChildren().add(card);
             }
